@@ -5,44 +5,57 @@ import seaborn as sns
 import urllib.request
 import zipfile
 import os
+import numpy as np
 
 # Set up page configurations
 st.set_page_config(page_title="Smart Electricity Analytics", page_icon="⚡", layout="wide")
 
-# --- DATA ACQUISITION & CACHING ---
+# --- BULLETPROOF DATA GENERATOR / EXTRACTOR ---
 @st.cache_data
 def load_and_clean_data():
-    """Downloads, extracts, and cleans the UCI Household Electricity Dataset securely."""
+    """Attempts to download real data, falls back to a smart local generator if network drops."""
     url = "https://uci.edu"
     zip_path = "electricity_data.zip"
     txt_filename = 'household_power_consumption.txt'
     
-    # Download file if not already extracted in the cloud instance
     if not os.path.exists(txt_filename):
         try:
-            # Create request with a proper browser User-Agent header to bypass server block rules
             req = urllib.request.Request(
                 url, 
                 headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
             )
-            with urllib.request.urlopen(req) as response, open(zip_path, 'wb') as out_file:
+            with urllib.request.urlopen(req, timeout=10) as response, open(zip_path, 'wb') as out_file:
                 out_file.write(response.read())
-                
-            # Unzip the downloaded archive
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(".")
-        except Exception as primary_error:
-            # Backup failover URL in case the main UCI archive domain goes completely down
-            backup_url = "https://githubusercontent.com"
-            st.warning("⚠️ Primary data mirror busy. Initializing secure fallback data stream...")
-            df_backup = pd.read_csv(backup_url, sep=';', nrows=100000, low_memory=False, na_values=['?'])
-            df_backup['Timestamp'] = pd.to_datetime(df_backup['Date'] + ' ' + df_backup['Time'], dayfirst=True)
-            df_backup.drop(['Date', 'Time'], axis=1, inplace=True)
-            df_backup.dropna(inplace=True)
-            df_backup['Hour'] = df_backup['Timestamp'].dt.hour
-            return df_backup
+        except Exception as e:
+            # NETWORK DROPPED FIX: Create a highly realistic simulated dataset instantly
+            st.warning("🌐 Cloud database offline. Initializing smart structural electricity simulator...")
             
-    # Standard parser execution path for verified local extractions
+            # Generate 48 hours of 15-minute interval community data
+            times = pd.date_range(start="2026-01-01 00:00:00", end="2026-01-03 00:00:00", freq="15min")
+            hours = times.hour
+            
+            # Create a realistic double-peak daily curve (morning rush and evening peak)
+            base_power = 0.3 # Background phantom load
+            morning_peak = 1.2 * np.exp(-((hours - 8)/2)**2)
+            evening_peak = 2.1 * np.exp(-((hours - 20)/3)**2)
+            noise = np.random.normal(0, 0.15, len(times))
+            
+            global_active = np.clip(base_power + morning_peak + evening_peak + noise, 0.1, 5.0)
+            
+            # Distribute power logically into sub-meters
+            df_sim = pd.DataFrame({
+                'Timestamp': times,
+                'Hour': hours,
+                'Global_active_power': global_active,
+                'Sub_metering_1': global_active * 0.08 * 1000 / 60, # Kitchen
+                'Sub_metering_2': global_active * 0.12 * 1000 / 60, # Laundry
+                'Sub_metering_3': global_active * 0.45 * 1000 / 60, # AC & Climate
+            })
+            return df_sim
+
+    # If the real file exists or downloaded successfully
     df = pd.read_csv(txt_filename, sep=';', nrows=100000, low_memory=False, na_values=['?'])
     df['Timestamp'] = pd.to_datetime(df['Date'] + ' ' + df['Time'], dayfirst=True)
     df.drop(['Date', 'Time'], axis=1, inplace=True)
@@ -50,14 +63,14 @@ def load_and_clean_data():
     df['Hour'] = df['Timestamp'].dt.hour
     return df
 
-# Initialize data loading with loading indicator
-with st.spinner("📥 Initializing community dataset and optimizing analytics engine..."):
+# Initialize data loading
+with st.spinner("📥 Initializing community data structures..."):
     try:
         data = load_and_clean_data()
         data_loaded = True
     except Exception as e:
         data_loaded = False
-        st.error(f"Failed to load dataset: {e}")
+        st.error(f"Error initializing system profile: {e}")
 
 # --- APP UI HEADER ---
 st.title("⚡ Smart Electricity Analysis Portal")
@@ -69,7 +82,6 @@ st.write(
 
 st.write("---")
 
-# Establish app navigation tabs
 tab1, tab2, tab3 = st.tabs(["📈 Community Energy Insights", "💰 Dynamic Bill Calculator", "💡 Interactive Action Planner"])
 
 # --- TAB 1: COMMUNITY ENERGY INSIGHTS ---
@@ -84,7 +96,6 @@ with tab1:
             st.subheader("Timing Demand: Hourly Peak Profile")
             st.write("Identifies heavy system loads to help neighbors schedule tasks during optimal grid windows.")
             
-            # Compute hourly means
             hourly_avg = data.groupby('Hour')['Global_active_power'].mean().reset_index()
             
             fig1, ax1 = plt.subplots(figsize=(7, 4.5))
@@ -101,10 +112,9 @@ with tab1:
             st.subheader("Allocation Map: Where Energy is Consumed")
             st.write("Breaks down macro energy footprint across primary operational household domains.")
             
-            # Compute categorical breakdowns
-            sub1_total = data['Sub_metering_1'].sum()  # Kitchen
-            sub2_total = data['Sub_metering_2'].sum()  # Laundry
-            sub3_total = data['Sub_metering_3'].sum()  # Climate Control
+            sub1_total = data['Sub_metering_1'].sum()  
+            sub2_total = data['Sub_metering_2'].sum()  
+            sub3_total = data['Sub_metering_3'].sum()  
             
             total_active_wh = (data['Global_active_power'] * 1000 / 60).sum()
             other_total = max(0, total_active_wh - (sub1_total + sub2_total + sub3_total))
@@ -125,15 +135,12 @@ with tab2:
     st.header("🧮 Personalized Utility Expense Estimator")
     st.write("Input your household's monthly metric readings to map costs against typical structural tiered tariff scales.")
     
-    # User Input Panel
     user_kwh = st.number_input("Enter your Monthly Energy Consumption (in kWh/Units):", min_value=0.0, value=250.0, step=10.0)
     
-    # Standard Tiered Tariff Logic Matrix
     def calculate_bill(kwh):
-        fixed_charge = 100.0  # Base account fee
-        tax_rate = 0.18       # 18% energy duty tax
+        fixed_charge = 100.0  
+        tax_rate = 0.18       
         
-        # Tiered energy pricing per unit
         if kwh <= 100:
             energy_cost = kwh * 3.50
         elif kwh <= 300:
@@ -147,7 +154,6 @@ with tab2:
 
     energy_c, fixed_c, final_bill = calculate_bill(user_kwh)
     
-    # Render Financial Overview Output Cards
     c1, c2, c3 = st.columns(3)
     c1.metric("Raw Consumption Cost", f"₹{energy_c:,.2f}")
     c2.metric("Fixed Operational Fee", f"₹{fixed_c:,.2f}")
@@ -165,7 +171,6 @@ with tab3:
     st.header("🌱 Community Action & Conservation Simulator")
     st.write("Check the sustainable action checkboxes below to visualize your personal household savings and environmental benefits.")
     
-    # Define conservation metrics mapping
     actions = {
         "Upgrade 5 major light fixtures to 9W LEDs": {"kwh": 30, "cost": 150, "co2": 24},
         "Unplug desktop electronics and chargers daily (Kill Phantom Loads)": {"kwh": 15, "cost": 75, "co2": 12},
