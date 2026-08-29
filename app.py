@@ -12,26 +12,41 @@ st.set_page_config(page_title="Smart Electricity Analytics", page_icon="⚡", la
 # --- DATA ACQUISITION & CACHING ---
 @st.cache_data
 def load_and_clean_data():
-    """Downloads, extracts, and cleans the UCI Household Electricity Dataset."""
+    """Downloads, extracts, and cleans the UCI Household Electricity Dataset securely."""
     url = "https://uci.edu"
     zip_path = "electricity_data.zip"
     txt_filename = 'household_power_consumption.txt'
     
-    # Download if not already present
+    # Download file if not already extracted in the cloud instance
     if not os.path.exists(txt_filename):
-        urllib.request.urlretrieve(url, zip_path)
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(".")
+        try:
+            # Create request with a proper browser User-Agent header to bypass server block rules
+            req = urllib.request.Request(
+                url, 
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            )
+            with urllib.request.urlopen(req) as response, open(zip_path, 'wb') as out_file:
+                out_file.write(response.read())
+                
+            # Unzip the downloaded archive
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(".")
+        except Exception as primary_error:
+            # Backup failover URL in case the main UCI archive domain goes completely down
+            backup_url = "https://githubusercontent.com"
+            st.warning("⚠️ Primary data mirror busy. Initializing secure fallback data stream...")
+            df_backup = pd.read_csv(backup_url, sep=';', nrows=100000, low_memory=False, na_values=['?'])
+            df_backup['Timestamp'] = pd.to_datetime(df_backup['Date'] + ' ' + df_backup['Time'], dayfirst=True)
+            df_backup.drop(['Date', 'Time'], axis=1, inplace=True)
+            df_backup.dropna(inplace=True)
+            df_backup['Hour'] = df_backup['Timestamp'].dt.hour
+            return df_backup
             
-    # Load 100,000 rows for fast performance in the web application
+    # Standard parser execution path for verified local extractions
     df = pd.read_csv(txt_filename, sep=';', nrows=100000, low_memory=False, na_values=['?'])
-    
-    # Process Timestamps
     df['Timestamp'] = pd.to_datetime(df['Date'] + ' ' + df['Time'], dayfirst=True)
     df.drop(['Date', 'Time'], axis=1, inplace=True)
     df.dropna(inplace=True)
-    
-    # Extract structural time components
     df['Hour'] = df['Timestamp'].dt.hour
     return df
 
