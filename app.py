@@ -1,203 +1,114 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
-import urllib.request
-import zipfile
-import os
-import numpy as np
 
-# Set up page configurations
-st.set_page_config(page_title="Smart Electricity Analytics", page_icon="⚡", layout="wide")
+# Set up clean page configurations
+st.set_page_config(page_title="My Smart Electricity Audit", page_icon="⚡", layout="centered")
 
-# --- BULLETPROOF DATA GENERATOR / EXTRACTOR ---
-@st.cache_data
-def load_and_clean_data():
-    """Attempts to download real data, falls back to a smart local generator if network drops."""
-    url = "https://uci.edu"
-    zip_path = "electricity_data.zip"
-    txt_filename = 'household_power_consumption.txt'
-    
-    if not os.path.exists(txt_filename):
-        try:
-            req = urllib.request.Request(
-                url, 
-                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-            )
-            with urllib.request.urlopen(req, timeout=10) as response, open(zip_path, 'wb') as out_file:
-                out_file.write(response.read())
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(".")
-        except Exception as e:
-            # NETWORK DROPPED FIX: Create a highly realistic simulated dataset instantly
-            st.warning("🌐 Cloud database offline. Initializing smart structural electricity simulator...")
-            
-            # Generate 48 hours of 15-minute interval community data
-            times = pd.date_range(start="2026-01-01 00:00:00", end="2026-01-03 00:00:00", freq="15min")
-            hours = times.hour
-            
-            # Create a realistic double-peak daily curve (morning rush and evening peak)
-            base_power = 0.3 # Background phantom load
-            morning_peak = 1.2 * np.exp(-((hours - 8)/2)**2)
-            evening_peak = 2.1 * np.exp(-((hours - 20)/3)**2)
-            noise = np.random.normal(0, 0.15, len(times))
-            
-            global_active = np.clip(base_power + morning_peak + evening_peak + noise, 0.1, 5.0)
-            
-            # Distribute power logically into sub-meters
-            df_sim = pd.DataFrame({
-                'Timestamp': times,
-                'Hour': hours,
-                'Global_active_power': global_active,
-                'Sub_metering_1': global_active * 0.08 * 1000 / 60, # Kitchen
-                'Sub_metering_2': global_active * 0.12 * 1000 / 60, # Laundry
-                'Sub_metering_3': global_active * 0.45 * 1000 / 60, # AC & Climate
-            })
-            return df_sim
-
-    # If the real file exists or downloaded successfully
-    df = pd.read_csv(txt_filename, sep=';', nrows=100000, low_memory=False, na_values=['?'])
-    df['Timestamp'] = pd.to_datetime(df['Date'] + ' ' + df['Time'], dayfirst=True)
-    df.drop(['Date', 'Time'], axis=1, inplace=True)
-    df.dropna(inplace=True)
-    df['Hour'] = df['Timestamp'].dt.hour
-    return df
-
-# Initialize data loading
-with st.spinner("📥 Initializing community data structures..."):
-    try:
-        data = load_and_clean_data()
-        data_loaded = True
-    except Exception as e:
-        data_loaded = False
-        st.error(f"Error initializing system profile: {e}")
-
-# --- APP UI HEADER ---
-st.title("⚡ Smart Electricity Analysis Portal")
-st.markdown("### *A Data-Driven Community Service Initiative*")
+# --- UI HEADER ---
+st.title("⚡ My Home Electricity Auditor")
+st.markdown("### *Calculate, Analyze, and Lower Your Electricity Bill*")
 st.write(
-    "This web application translates millions of household energy data rows into actionable intelligence. "
-    "Use this tool to discover regional peak demand patterns, evaluate your utility costs, and simulate personal carbon reductions."
+    "Welcome! This simple tool helps you calculate your exact home electricity costs. "
+    "Enter your real appliance usage below to discover what drives your bill up and how you can save money."
 )
+st.write("---")
+
+# --- STEP 1: APPLIANCE USAGE INPUT PANEL ---
+st.header("🔌 Step 1: Tell Us About Your Daily Usage")
+st.write("Adjust the sliders below to match how many hours you run these appliances every day:")
+
+# Layout inputs beautifully using columns
+col1, col2 = st.columns(2)
+
+with col1:
+    ac_hours = st.slider("Air Conditioner (AC) - Daily Hours:", 0, 24, 4, help="Average 1.5 Ton AC uses ~1500 Watts")
+    refrigerator_hours = st.slider("Refrigerator - Daily Hours:", 0, 24, 24, help="Stays on 24/7, but compressor runs ~10 hours total")
+    tv_hours = st.slider("Television / Entertainment - Daily Hours:", 0, 24, 3, help="TV and setup box use ~150 Watts")
+
+with col2:
+    led_count = st.number_input("Number of LED Bulbs in House:", min_value=0, max_value=50, value=6)
+    led_hours = st.slider("Average Hours Lights are ON daily:", 0, 24, 6)
+    fan_count = st.number_input("Number of Ceiling Fans in House:", min_value=0, max_value=20, value=4)
+    fan_hours = st.slider("Average Hours Fans are ON daily:", 0, 24, 12)
 
 st.write("---")
 
-tab1, tab2, tab3 = st.tabs(["📈 Community Energy Insights", "💰 Dynamic Bill Calculator", "💡 Interactive Action Planner"])
+# --- STEP 2: MATHEMATICAL ENERGY CALCULATIONS ---
+# Standard Wattage values for common Indian appliances
+WATT_AC = 1500
+WATT_REF = 200  # Average cycling load
+WATT_TV = 150
+WATT_LED = 9
+WATT_FAN = 75
 
-# --- TAB 1: COMMUNITY ENERGY INSIGHTS ---
-with tab1:
-    st.header("📊 Regional Energy Consumption Trends")
-    st.write("Data insights derived from a residential framework tracking granular appliance usage.")
-    
-    if data_loaded:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("Timing Demand: Hourly Peak Profile")
-            st.write("Identifies heavy system loads to help neighbors schedule tasks during optimal grid windows.")
-            
-            hourly_avg = data.groupby('Hour')['Global_active_power'].mean().reset_index()
-            
-            fig1, ax1 = plt.subplots(figsize=(7, 4.5))
-            sns.lineplot(data=hourly_avg, x='Hour', y='Global_active_power', marker='o', color='#008080', ax=ax1, linewidth=2)
-            ax1.set_xlabel("Hour of the Day (0 - 23)")
-            ax1.set_ylabel("Average Active Power Draw (kW)")
-            ax1.grid(True, linestyle='--', alpha=0.5)
-            plt.xticks(range(0, 24, 2))
-            st.pyplot(fig1)
-            
-            st.info("💡 **Community Service Advice:** Notice the evening spike? Shifting utility tasks (like washing machines) to early morning or midday relieves grid stress and minimizes localized blackouts.")
-            
-        with col2:
-            st.subheader("Allocation Map: Where Energy is Consumed")
-            st.write("Breaks down macro energy footprint across primary operational household domains.")
-            
-            sub1_total = data['Sub_metering_1'].sum()  
-            sub2_total = data['Sub_metering_2'].sum()  
-            sub3_total = data['Sub_metering_3'].sum()  
-            
-            total_active_wh = (data['Global_active_power'] * 1000 / 60).sum()
-            other_total = max(0, total_active_wh - (sub1_total + sub2_total + sub3_total))
-            
-            labels = ['Kitchen Zone', 'Laundry/Utility', 'AC & Water Heat', 'Other Unmapped (TVs/Lights)']
-            sizes = [sub1_total, sub2_total, sub3_total, other_total]
-            colors = ['#ff9999','#66b3ff','#99ff99','#ffcc99']
-            
-            fig2, ax2 = plt.subplots(figsize=(6, 6))
-            ax2.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=140, colors=colors,
-                    wedgeprops={'edgecolor': 'black', 'linewidth': 0.8})
-            st.pyplot(fig2)
-            
-            st.info("⚠️ **Ghost Load Notice:** The 'Other Unmapped' segment contains hidden 'Phantom Loads'—vampire energy consumed by standby TVs and smart appliances left switched on at the wall.")
+# Calculate daily Wh (Watt-hours)
+ac_wh = WATT_AC * ac_hours
+ref_wh = WATT_REF * refrigerator_hours
+tv_wh = WATT_TV * tv_hours
+led_wh = WATT_LED * led_count * led_hours
+fan_wh = WATT_FAN * fan_count * fan_hours
 
-# --- TAB 2: DYNAMIC BILL CALCULATOR ---
-with tab2:
-    st.header("🧮 Personalized Utility Expense Estimator")
-    st.write("Input your household's monthly metric readings to map costs against typical structural tiered tariff scales.")
-    
-    user_kwh = st.number_input("Enter your Monthly Energy Consumption (in kWh/Units):", min_value=0.0, value=250.0, step=10.0)
-    
-    def calculate_bill(kwh):
-        fixed_charge = 100.0  
-        tax_rate = 0.18       
-        
-        if kwh <= 100:
-            energy_cost = kwh * 3.50
-        elif kwh <= 300:
-            energy_cost = (100 * 3.50) + ((kwh - 100) * 5.25)
-        else:
-            energy_cost = (100 * 3.50) + (200 * 5.25) + ((kwh - 300) * 7.75)
-            
-        subtotal = energy_cost + fixed_charge
-        total_bill = subtotal + (subtotal * tax_rate)
-        return energy_cost, fixed_charge, total_bill
+# Calculate Total Units (kWh) per month (multiplied by 30 days)
+ac_units = (ac_wh / 1000) * 30
+ref_units = (ref_wh / 1000) * 30
+tv_units = (tv_wh / 1000) * 30
+led_units = (led_wh / 1000) * 30
+fan_units = (fan_wh / 1000) * 30
 
-    energy_c, fixed_c, final_bill = calculate_bill(user_kwh)
-    
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Raw Consumption Cost", f"₹{energy_c:,.2f}")
-    c2.metric("Fixed Operational Fee", f"₹{fixed_c:,.2f}")
-    c3.metric("Projected Monthly Bill (inc. Tax)", f"₹{final_bill:,.2f}")
-    
-    st.markdown("""
-    ##### 📌 Tariff Threshold Breakdown Details
-    *   **Tier 1 (First 100 Units):** ₹3.50 / Unit
-    *   **Tier 2 (101 to 300 Units):** ₹5.25 / Unit
-    *   **Tier 3 (Above 300 Units):** ₹7.75 / Unit *(High Demand Penalty Tier)*
-    """)
+total_monthly_units = ac_units + ref_units + tv_units + led_units + fan_units
 
-# --- TAB 3: INTERACTIVE ACTION PLANNER ---
-with tab3:
-    st.header("🌱 Community Action & Conservation Simulator")
-    st.write("Check the sustainable action checkboxes below to visualize your personal household savings and environmental benefits.")
+# --- STEP 3: TIERED TARIFF CALCULATION (Indian Slab Structure) ---
+def compute_indian_bill(kwh):
+    fixed_charge = 100.0  # Standard fixed connection fee
+    tax_rate = 0.18       # 18% Electricity Regulatory Duty/Tax
     
-    actions = {
-        "Upgrade 5 major light fixtures to 9W LEDs": {"kwh": 30, "cost": 150, "co2": 24},
-        "Unplug desktop electronics and chargers daily (Kill Phantom Loads)": {"kwh": 15, "cost": 75, "co2": 12},
-        "Optimize AC settings to a recommended 24°C - 26°C zone": {"kwh": 45, "cost": 235, "co2": 36},
-        "Shift laundry schedules entirely to off-peak slots (Before 6 PM)": {"kwh": 10, "cost": 50, "co2": 8}
-    }
-    
-    saved_kwh = 0
-    saved_money = 0
-    saved_co2 = 0
-    
-    st.subheader("Select Your Commitments:")
-    for action, metrics in actions.items():
-        if st.checkbox(action):
-            saved_kwh += metrics["kwh"]
-            saved_money += metrics["cost"]
-            saved_co2 += metrics["co2"]
-            
-    st.write("---")
-    st.subheader("📉 Your Collective Monthly Impact Summary")
-    
-    a1, a2, a3 = st.columns(3)
-    a1.metric("Energy Conservation Target", f"{saved_kwh} kWh Saved")
-    a2.metric("Direct Financial Savings", f"₹{saved_money} Retained")
-    a3.metric("Carbon Footprint Reduction", f"{saved_co2} kg CO₂ Prevented")
-    
-    if saved_kwh > 0:
-        st.success("🌟 **Inspirational Fact:** If just **100 families** in your residential area implement your chosen checklist actions, the community will collectively stop over **3 metric tonnes of CO₂ emissions** from entering the atmosphere every single month!")
+    if kwh <= 100:
+        energy_cost = kwh * 3.50
+    elif kwh <= 300:
+        energy_cost = (100 * 3.50) + ((kwh - 100) * 5.25)
     else:
-        st.info("💡 Select one or more action checkboxes above to initialize the target conservation simulator.")
+        energy_cost = (100 * 3.50) + (200 * 5.25) + ((kwh - 300) * 7.75)
+        
+    subtotal = energy_cost + fixed_charge
+    total_bill = subtotal + (subtotal * tax_rate)
+    return total_bill
+
+projected_bill = compute_indian_bill(total_monthly_units)
+
+# --- STEP 4: DISPLAY RESULTS & LIVE INSIGHTS ---
+st.header("📊 Step 2: Your Personalized Energy Bill Report")
+
+# Display Summary Metric Cards
+c1, c2 = st.columns(2)
+c1.metric("Estimated Monthly Consumption", f"{total_monthly_units:.1f} Units (kWh)")
+c2.metric("Projected Monthly Bill (with Tax)", f"₹{projected_bill:,.2f}")
+
+# Render Breakdown Pie Chart
+st.subheader("💡 Where is your money actually going?")
+labels = ['Air Conditioner', 'Refrigerator', 'Television', 'LED Lighting', 'Ceiling Fans']
+sizes = [ac_units, ref_units, tv_units, led_units, fan_units]
+colors = ['#ff9999', '#66b3ff', '#99ff99', '#ffcc99', '#bcbd22']
+
+# Only plot if there is actual usage to avoid errors
+if total_monthly_units > 0:
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=140, colors=colors,
+            wedgeprops={'edgecolor': 'black', 'linewidth': 0.8})
+    st.pyplot(fig)
+else:
+    st.info("Please adjust sliders above to calculate your breakdown.")
+
+# --- STEP 5: PERSONAL SAVINGS ADVISOR ---
+st.write("---")
+st.header("🌱 Step 3: Customized Money-Saving Advice")
+
+if ac_hours > 5:
+    st.warning("⚠️ **AC Alert:** Your Air Conditioner makes up a massive part of your bill. **Action:** Setting your AC to **24°C instead of 18°C** can reduce your AC's electricity consumption by up to 24%!")
+
+if total_monthly_units > 300:
+    st.error("🚨 **High Tariff Warning:** Your home has crossed **300 Units**. You are now paying the highest rate (₹7.75 per unit). Reducing just 20 units this month will drop you into a cheaper tax bracket and save you hundreds of rupees instantly!")
+else:
+    st.success("🌟 **Great Job!** Your usage is under 300 units, keeping you in the safer, low-cost utility price brackets.")
+
+st.info("💡 **Quick Community Tip:** Unplug your TV and set-top box at the main wall switch when going to sleep. Leaving them on standby mode can waste up to 15 Units a month for no reason!")
