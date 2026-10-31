@@ -1,8 +1,10 @@
-
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-from datetime import date
+from datetime import date, datetime
+from pathlib import Path
+import re
+import io
 
 # ==========================================================
 # PAGE CONFIGURATION
@@ -17,29 +19,131 @@ st.set_page_config(
 st.title("⚡ Smart Home Electricity Auditor")
 st.markdown("### Calculate, Analyze, and Reduce Your Electricity Bill")
 st.write(
-    "An intelligent household electricity auditing system "
-    "with appliance analysis, tariff estimation and personalized savings."
+    "Understand household electricity usage, estimate costs, "
+    "compare bills and discover practical ways to reduce consumption."
 )
 
-st.caption("Tariff reference year: FY 2026–27 | Billing model: 30-day estimate")
+HISTORY_FILE = Path("electricity_history.csv")
+
+
+# ==========================================================
+# AUTOMATIC TARIFF DATABASE
+# ==========================================================
+# Only configured tariff schedules are used.
+# Do not add estimated or example rates to this database.
+# Source information is retained internally and is not
+# displayed in the normal app interface.
+#
+# Note: Verify tariff orders and connection-specific charges
+# before using these values for a real bill.
+# ==========================================================
+
+TARIFFS = {
+    ("Andhra Pradesh", "APEPDCL", "Domestic - General"): {
+        "name": "Domestic LT",
+        "effective": "2026-04-01",
+        "slabs": [
+            {"upper": 30, "rate": 1.90},
+            {"upper": 75, "rate": 3.00},
+            {"upper": 125, "rate": 4.50},
+            {"upper": 225, "rate": 6.00},
+            {"upper": 400, "rate": 8.75},
+            {"upper": None, "rate": 9.75},
+        ],
+        "fixed": 10.0,
+        "max_units": None,
+        "source": "APERC FY 2026-27 tariff schedule"
+    },
+
+    ("Andhra Pradesh", "APSPDCL", "Domestic - General"): {
+        "name": "Domestic LT",
+        "effective": "2026-04-01",
+        "slabs": [
+            {"upper": 30, "rate": 1.90},
+            {"upper": 75, "rate": 3.00},
+            {"upper": 125, "rate": 4.50},
+            {"upper": 225, "rate": 6.00},
+            {"upper": 400, "rate": 8.75},
+            {"upper": None, "rate": 9.75},
+        ],
+        "fixed": 10.0,
+        "max_units": None,
+        "source": "APERC FY 2026-27 tariff schedule"
+    },
+
+    ("Telangana", "TGSPDCL", "Domestic - General"): {
+        "name": "Domestic LT",
+        "effective": "2026-04-01",
+        "slabs": [
+            {"upper": 50, "rate": 1.95},
+            {"upper": 100, "rate": 3.10},
+        ],
+        "fixed": 10.0,
+        "max_units": 100,
+        "source": "TGERC FY 2026-27 tariff schedule"
+    },
+
+    ("Telangana", "TGNPDCL", "Domestic - General"): {
+        "name": "Domestic LT",
+        "effective": "2026-04-01",
+        "slabs": [
+            {"upper": 50, "rate": 1.95},
+            {"upper": 100, "rate": 3.10},
+        ],
+        "fixed": 10.0,
+        "max_units": 100,
+        "source": "TGERC FY 2026-27 tariff schedule"
+    },
+}
+
 
 # ==========================================================
 # DISCOM DATABASE
 # ==========================================================
 
 DISCOMS = {
-    "Andhra Pradesh": ["APEPDCL", "APSPDCL", "APCPDCL / Other"],
-    "Telangana": ["TGSPDCL", "TGNPDCL"],
-    "Karnataka": ["BESCOM", "MESCOM", "HESCOM", "GESCOM", "CESC"],
+    "Andhra Pradesh": [
+        "APEPDCL",
+        "APSPDCL",
+        "APCPDCL / Other"
+    ],
+    "Telangana": [
+        "TGSPDCL",
+        "TGNPDCL"
+    ],
+    "Karnataka": [
+        "BESCOM",
+        "MESCOM",
+        "HESCOM",
+        "GESCOM",
+        "CESC"
+    ],
     "Tamil Nadu": ["TNPDCL / TANGEDCO"],
-    "Maharashtra": ["MSEDCL", "BEST", "Adani Electricity", "Tata Power"],
+    "Maharashtra": [
+        "MSEDCL",
+        "BEST",
+        "Adani Electricity",
+        "Tata Power"
+    ],
     "Delhi": ["BRPL", "BYPL", "TPDDL", "NDMC"],
     "Kerala": ["KSEB"],
-    "Gujarat": ["DGVCL", "MGVCL", "PGVCL", "UGVCL", "Torrent Power"],
+    "Gujarat": [
+        "DGVCL",
+        "MGVCL",
+        "PGVCL",
+        "UGVCL",
+        "Torrent Power"
+    ],
     "Rajasthan": ["JVVNL", "AVVNL", "JDVVNL"],
     "Punjab": ["PSPCL"],
     "Haryana": ["DHBVN", "UHBVN"],
-    "Uttar Pradesh": ["PVVNL", "MVVNL", "DVVNL", "PuVVNL", "KESCO"],
+    "Uttar Pradesh": [
+        "PVVNL",
+        "MVVNL",
+        "DVVNL",
+        "PuVVNL",
+        "KESCO"
+    ],
     "West Bengal": ["WBSEDCL", "CESC"],
     "Odisha": ["TPCODL", "TPNODL", "TPWODL", "TPSODL"],
     "Bihar": ["NBPDCL", "SBPDCL"],
@@ -52,86 +156,6 @@ DISCOMS = {
     "Other State / UT": ["Other / Not Listed"]
 }
 
-# ==========================================================
-# OFFICIAL TARIFF CONFIGURATION
-# ==========================================================
-#
-# Each tariff schedule contains:
-# upper_limit: maximum units covered by the slab
-# rate: price per unit in that slab
-#
-# The calculator uses telescopic (marginal slab) calculation.
-#
-# AP: FY 2026-27 general domestic LT schedule.
-# Telangana: only the published <=100-unit category is
-# configured here. Do not extrapolate it above 100 units.
-#
-# Fixed charges and statutory levies can vary by load,
-# phase, category and other conditions.
-# ==========================================================
-
-TARIFFS = {
-    ("Andhra Pradesh", "APEPDCL"): {
-        "name": "Category I(A) Domestic LT",
-        "slabs": [
-            {"upper": 30, "rate": 1.90},
-            {"upper": 75, "rate": 3.00},
-            {"upper": 125, "rate": 4.50},
-            {"upper": 225, "rate": 6.00},
-            {"upper": 400, "rate": 8.75},
-            {"upper": None, "rate": 9.75},
-        ],
-        "fixed": 10.0,
-        "max_units": None,
-        "source": "APERC FY 2026-27 Retail Supply Tariff Order",
-        "url": "https://aperc.gov.in/page/Tariff_Orders",
-        "effective": "01-04-2026",
-        "note": "Fixed charge is a starter reference; verify applicable load/category."
-    },
-    ("Andhra Pradesh", "APSPDCL"): {
-        "name": "Category I(A) Domestic LT",
-        "slabs": [
-            {"upper": 30, "rate": 1.90},
-            {"upper": 75, "rate": 3.00},
-            {"upper": 125, "rate": 4.50},
-            {"upper": 225, "rate": 6.00},
-            {"upper": 400, "rate": 8.75},
-            {"upper": None, "rate": 9.75},
-        ],
-        "fixed": 10.0,
-        "max_units": None,
-        "source": "APERC FY 2026-27 Retail Supply Tariff Order",
-        "url": "https://aperc.gov.in/page/Tariff_Orders",
-        "effective": "01-04-2026",
-        "note": "Fixed charge is a starter reference; verify applicable load/category."
-    },
-    ("Telangana", "TGSPDCL"): {
-        "name": "LT-I(A) Domestic - up to 100 units",
-        "slabs": [
-            {"upper": 50, "rate": 1.95},
-            {"upper": 100, "rate": 3.10},
-        ],
-        "fixed": 10.0,
-        "max_units": 100,
-        "source": "TGERC FY 2026-27 Retail Supply Tariff Order",
-        "url": "https://www.tgerc.telangana.gov.in/tariffschdule.php",
-        "effective": "01-04-2026",
-        "note": "This schedule is only for eligible consumption not exceeding 100 units."
-    },
-    ("Telangana", "TGNPDCL"): {
-        "name": "LT-I(A) Domestic - up to 100 units",
-        "slabs": [
-            {"upper": 50, "rate": 1.95},
-            {"upper": 100, "rate": 3.10},
-        ],
-        "fixed": 10.0,
-        "max_units": 100,
-        "source": "TGERC FY 2026-27 Retail Supply Tariff Order",
-        "url": "https://www.tgerc.telangana.gov.in/tariffschdule.php",
-        "effective": "01-04-2026",
-        "note": "This schedule is only for eligible consumption not exceeding 100 units."
-    }
-}
 
 # ==========================================================
 # COMMON APPLIANCES
@@ -151,126 +175,41 @@ COMMON_APPLIANCES = [
     ["Microwave", 1, 1200, 0.3],
 ]
 
+
 # ==========================================================
-# TARIFF CALCULATION FUNCTIONS
+# CUSTOM EXCEPTIONS
 # ==========================================================
 
-def calculate_slab_charges(units, slabs):
-    """Calculate telescopic energy charges."""
-    remaining = max(0.0, float(units))
-    previous_limit = 0.0
-    total = 0.0
-    breakdown = []
-
-    for slab in slabs:
-        upper = slab["upper"]
-        rate = float(slab["rate"])
-
-        if upper is None:
-            slab_units = remaining
-        else:
-            slab_units = min(
-                remaining,
-                max(0.0, float(upper) - previous_limit)
-            )
-
-        charge = slab_units * rate
-
-        if slab_units > 0:
-            breakdown.append({
-                "Slab": (
-                    f"{previous_limit:g} units onwards"
-                    if upper is None
-                    else f"{previous_limit:g}-{upper:g} units"
-                ),
-                "Units": slab_units,
-                "Rate (₹/unit)": rate,
-                "Charge (₹)": charge
-            })
-
-        total += charge
-        remaining -= slab_units
-
-        if upper is not None:
-            previous_limit = float(upper)
-
-        if remaining <= 0:
-            break
-
-    if remaining > 0:
-        raise ValueError("Tariff configuration does not cover all units.")
-
-    return total, pd.DataFrame(breakdown)
-
-
-def calculate_bill(
-    units,
-    slabs,
-    fixed_charge,
-    duty_type,
-    duty_value,
-    adjustment_type,
-    adjustment_value,
-    other_charges,
-    subsidy
-):
-    energy, slab_details = calculate_slab_charges(units, slabs)
-
-    if duty_type == "Percentage of energy charge":
-        duty = energy * duty_value / 100
-    elif duty_type == "₹ per unit":
-        duty = units * duty_value
-    else:
-        duty = 0.0
-
-    if adjustment_type == "₹ per unit":
-        adjustment = units * adjustment_value
-    elif adjustment_type == "Percentage of energy charge":
-        adjustment = energy * adjustment_value / 100
-    else:
-        adjustment = 0.0
-
-    before_subsidy = (
-        energy + fixed_charge + duty + adjustment + other_charges
-    )
-
-    subsidy_applied = min(
-        max(0.0, subsidy),
-        before_subsidy
-    )
-
-    total = before_subsidy - subsidy_applied
-
-    return {
-        "energy": energy,
-        "fixed": fixed_charge,
-        "duty": duty,
-        "adjustment": adjustment,
-        "other": other_charges,
-        "subsidy": subsidy_applied,
-        "total": total,
-        "slabs": slab_details
-    }
+class TariffUnavailable(Exception):
+    pass
 
 
 # ==========================================================
-# APPLIANCE CALCULATIONS
+# APPLIANCE CALCULATION
 # ==========================================================
 
 def calculate_appliances(df, days):
+
     results = []
 
     for _, row in df.iterrows():
-        name = str(row["Appliance"]).strip()
+
+        name = str(row.get("Appliance", "")).strip()
 
         if not name:
             continue
 
-        quantity = float(row["Quantity"])
-        wattage = float(row["Wattage (W)"])
-        hours = float(row["Hours/day"])
+        try:
+            quantity = float(row["Quantity"])
+            wattage = float(row["Wattage (W)"])
+            hours = float(row["Hours/day"])
+        except (ValueError, TypeError):
+            continue
 
-        if quantity < 0 or wattage < 0 or not 0 <= hours <= 24:
+        if quantity < 0 or wattage < 0:
+            continue
+
+        if not 0 <= hours <= 24:
             continue
 
         daily_units = quantity * wattage * hours / 1000
@@ -289,6 +228,249 @@ def calculate_appliances(df, days):
 
 
 # ==========================================================
+# AUTOMATIC SLAB CALCULATION
+# ==========================================================
+
+def calculate_slab_charges(units, tariff):
+
+    if units < 0:
+        raise ValueError("Units cannot be negative.")
+
+    maximum = tariff.get("max_units")
+
+    if maximum is not None and units > maximum:
+        raise TariffUnavailable(
+            f"The configured tariff schedule covers only up to "
+            f"{maximum} units. Your estimated consumption is "
+            f"{units:.2f} units. A higher-usage verified tariff "
+            f"schedule is not currently configured."
+        )
+
+    remaining = float(units)
+    previous_limit = 0.0
+    total = 0.0
+    breakdown = []
+
+    for slab in tariff["slabs"]:
+
+        upper = slab["upper"]
+        rate = float(slab["rate"])
+
+        if upper is None:
+            slab_units = remaining
+        else:
+            slab_units = min(
+                remaining,
+                max(0.0, float(upper) - previous_limit)
+            )
+
+        if slab_units > 0:
+
+            charge = slab_units * rate
+            total += charge
+
+            breakdown.append({
+                "Slab": (
+                    f"{previous_limit:g} units onwards"
+                    if upper is None
+                    else f"{previous_limit:g}–{upper:g} units"
+                ),
+                "Units": round(slab_units, 2),
+                "Rate (₹/unit)": rate,
+                "Charge (₹)": round(charge, 2)
+            })
+
+            remaining -= slab_units
+
+        if upper is not None:
+            previous_limit = float(upper)
+
+        if remaining <= 0:
+            break
+
+    if remaining > 0.000001:
+        raise TariffUnavailable(
+            "The configured tariff does not cover this consumption."
+        )
+
+    return round(total, 2), pd.DataFrame(breakdown)
+
+
+# ==========================================================
+# BILL CALCULATION
+# ==========================================================
+
+def calculate_bill(units, tariff):
+
+    energy, slab_details = calculate_slab_charges(
+        units,
+        tariff
+    )
+
+    fixed_charge = tariff.get("fixed")
+
+    if fixed_charge is None:
+        raise TariffUnavailable(
+            "The fixed charge for this connection has not "
+            "been configured. A complete bill estimate "
+            "cannot be calculated."
+        )
+
+    fixed_charge = float(fixed_charge)
+
+    total = energy + fixed_charge
+
+    return {
+        "energy": energy,
+        "fixed": fixed_charge,
+        "total": total,
+        "slabs": slab_details
+    }
+
+
+# ==========================================================
+# BILL HISTORY FUNCTIONS
+# ==========================================================
+
+def load_history():
+
+    if HISTORY_FILE.exists():
+
+        try:
+            return pd.read_csv(HISTORY_FILE)
+
+        except Exception:
+            pass
+
+    return pd.DataFrame(columns=[
+        "Saved At",
+        "Month",
+        "State",
+        "DISCOM",
+        "Billing Days",
+        "Appliance Units",
+        "Meter Units",
+        "Actual Bill (₹)",
+        "Estimated Bill (₹)"
+    ])
+
+
+def save_history(record):
+
+    history = load_history()
+
+    history = pd.concat(
+        [history, pd.DataFrame([record])],
+        ignore_index=True
+    )
+
+    history.to_csv(HISTORY_FILE, index=False)
+
+    return history
+
+
+# ==========================================================
+# ELECTRICITY BILL OCR
+# ==========================================================
+
+def extract_bill_text(uploaded_file):
+
+    filename = uploaded_file.name.lower()
+    file_bytes = uploaded_file.getvalue()
+
+    # PDF extraction
+    if filename.endswith(".pdf"):
+
+        try:
+            import pdfplumber
+
+            with pdfplumber.open(
+                io.BytesIO(file_bytes)
+            ) as pdf:
+
+                pages_text = []
+
+                for page in pdf.pages:
+                    pages_text.append(page.extract_text() or "")
+
+                return "\n".join(pages_text)
+
+        except ImportError:
+            raise RuntimeError(
+                "PDF reading requires pdfplumber. "
+                "Install it using: pip install pdfplumber"
+            )
+
+    # Image OCR
+    try:
+        from PIL import Image
+        import pytesseract
+
+        image = Image.open(io.BytesIO(file_bytes))
+
+        return pytesseract.image_to_string(image)
+
+    except ImportError:
+        raise RuntimeError(
+            "Image OCR requires Pillow and pytesseract. "
+            "Install them using: pip install pillow pytesseract"
+        )
+
+
+# ==========================================================
+# EXTRACT BILL VALUES
+# ==========================================================
+
+def parse_bill_fields(text):
+
+    patterns = {
+
+        "units": [
+            r"(?:units consumed|consumption|kwh|units)"
+            r"\D{0,25}([0-9]+(?:\.[0-9]+)?)",
+
+            r"([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|units)"
+        ],
+
+        "amount": [
+            r"(?:total amount|amount payable|net amount|"
+            r"bill amount|total due)"
+            r"\D{0,30}(?:₹|rs\.?|inr)?\s*"
+            r"([0-9,]+(?:\.[0-9]{1,2})?)"
+        ],
+
+        "days": [
+            r"(?:billing days|no\.?\s*of\s*days)"
+            r"\D{0,15}([0-9]{1,3})"
+        ]
+    }
+
+    extracted = {}
+
+    for field, expressions in patterns.items():
+
+        for pattern in expressions:
+
+            match = re.search(
+                pattern,
+                text,
+                flags=re.IGNORECASE
+            )
+
+            if match:
+
+                try:
+                    value = match.group(1).replace(",", "")
+                    extracted[field] = float(value)
+                    break
+
+                except ValueError:
+                    pass
+
+    return extracted
+
+
+# ==========================================================
 # STEP 1 - CONNECTION DETAILS
 # ==========================================================
 
@@ -297,6 +479,7 @@ st.header("1. Electricity Connection Details")
 col1, col2, col3 = st.columns(3)
 
 with col1:
+
     state = st.selectbox(
         "State / Union Territory",
         list(DISCOMS.keys()),
@@ -304,20 +487,28 @@ with col1:
     )
 
 with col2:
+
     discom = st.selectbox(
         "Electricity Provider (DISCOM)",
         DISCOMS[state]
     )
 
 with col3:
+
     category = st.selectbox(
         "Consumer Category",
-        ["Domestic - General", "Domestic - BPL/Lifeline", "Other"]
+        [
+            "Domestic - General",
+            "Domestic - BPL/Lifeline",
+            "Other"
+        ]
     )
+
 
 col4, col5 = st.columns(2)
 
 with col4:
+
     billing_days = st.number_input(
         "Billing period (days)",
         min_value=1,
@@ -326,6 +517,7 @@ with col4:
     )
 
 with col5:
+
     sanctioned_load = st.number_input(
         "Sanctioned load (kW), if known",
         min_value=0.0,
@@ -335,9 +527,10 @@ with col5:
     )
 
 st.caption(
-    "Sanctioned load is used for tariff verification where applicable. "
-    "It is not the same as monthly energy consumption."
+    "Sanctioned load and monthly energy consumption are different "
+    "measurements. Your actual tariff may depend on connection details."
 )
+
 
 # ==========================================================
 # STEP 2 - APPLIANCE INPUTS
@@ -347,13 +540,18 @@ st.divider()
 st.header("2. Household Appliance Usage")
 
 st.write(
-    "Edit the common appliances below. Wattage should ideally "
-    "come from the appliance nameplate or manufacturer specification."
+    "Edit the common appliances below. Use the wattage printed "
+    "on the appliance label wherever possible."
 )
 
 common_df = pd.DataFrame(
     COMMON_APPLIANCES,
-    columns=["Appliance", "Quantity", "Wattage (W)", "Hours/day"]
+    columns=[
+        "Appliance",
+        "Quantity",
+        "Wattage (W)",
+        "Hours/day"
+    ]
 )
 
 common_df = st.data_editor(
@@ -363,64 +561,91 @@ common_df = st.data_editor(
     hide_index=True,
     num_rows="fixed",
     column_config={
-        "Appliance": st.column_config.TextColumn(disabled=True),
+
+        "Appliance": st.column_config.TextColumn(
+            disabled=True
+        ),
+
         "Quantity": st.column_config.NumberColumn(
-            min_value=0, max_value=100, step=1
+            min_value=0,
+            max_value=100,
+            step=1
         ),
+
         "Wattage (W)": st.column_config.NumberColumn(
-            min_value=0, max_value=50000, step=1
+            min_value=0,
+            max_value=50000,
+            step=1
         ),
+
         "Hours/day": st.column_config.NumberColumn(
-            min_value=0.0, max_value=24.0, step=0.5
+            min_value=0.0,
+            max_value=24.0,
+            step=0.5
         )
     }
 )
 
+
 st.subheader("➕ Add Extra Appliances")
 
 st.write(
-    "Add any appliance not listed above: iron box, air cooler, "
-    "desktop, EV charger, water purifier, hair dryer, etc."
+    "Add appliances not listed above, such as an iron box, "
+    "air cooler, desktop, EV charger or water purifier."
 )
 
-custom_df = pd.DataFrame([
-    {
+custom_df = st.data_editor(
+    pd.DataFrame([{
         "Appliance": "",
         "Quantity": 1,
         "Wattage (W)": 100,
         "Hours/day": 1.0
-    }
-])
-
-custom_df = st.data_editor(
-    custom_df,
+    }]),
     key="custom_appliance_editor",
     use_container_width=True,
     hide_index=True,
     num_rows="dynamic",
     column_config={
+
         "Appliance": st.column_config.TextColumn(),
+
         "Quantity": st.column_config.NumberColumn(
-            min_value=0, max_value=100, step=1
+            min_value=0,
+            max_value=100,
+            step=1
         ),
+
         "Wattage (W)": st.column_config.NumberColumn(
-            min_value=0, max_value=50000, step=1
+            min_value=0,
+            max_value=50000,
+            step=1
         ),
+
         "Hours/day": st.column_config.NumberColumn(
-            min_value=0.0, max_value=24.0, step=0.5
+            min_value=0.0,
+            max_value=24.0,
+            step=0.5
         )
     }
 )
 
+
 # ==========================================================
-# STEP 3 - CONSUMPTION
+# STEP 3 - CONSUMPTION CALCULATION
 # ==========================================================
 
 st.divider()
 st.header("3. Monthly Electricity Consumption")
 
-common_results = calculate_appliances(common_df, billing_days)
-custom_results = calculate_appliances(custom_df, billing_days)
+common_results = calculate_appliances(
+    common_df,
+    billing_days
+)
+
+custom_results = calculate_appliances(
+    custom_df,
+    billing_days
+)
 
 all_results = pd.concat(
     [common_results, custom_results],
@@ -431,347 +656,118 @@ if all_results.empty:
     st.error("Please enter at least one appliance.")
     st.stop()
 
-total_units = all_results["Monthly Units"].sum()
+total_units = float(
+    all_results["Monthly Units"].sum()
+)
 
-st.metric(
-    "Estimated consumption for billing period",
+daily_units = total_units / billing_days
+
+c1, c2, c3 = st.columns(3)
+
+c1.metric(
+    "Estimated consumption",
     f"{total_units:.2f} kWh"
 )
 
-st.metric(
+c2.metric(
     "Average daily consumption",
-    f"{total_units / billing_days:.2f} kWh/day"
+    f"{daily_units:.2f} kWh"
 )
 
+c3.metric(
+    "Billing period",
+    f"{billing_days} days"
+)
+
+
 # ==========================================================
-# STEP 4 - TARIFF ENGINE
+# STEP 4 - AUTOMATIC TARIFF ENGINE
 # ==========================================================
 
 st.divider()
-st.header("4. Automatic Tariff Engine")
+st.header("4. Automatic Tariff Calculation")
 
-tariff_key = (state, discom)
-tariff = TARIFFS.get(tariff_key)
+tariff = TARIFFS.get(
+    (state, discom, category)
+)
 
-if tariff and category != "Domestic - General":
-    tariff = None
+bill = None
+tariff_error = None
 
-if tariff:
-    st.success(f"Configured tariff: {tariff['name']}")
-    st.write(f"Effective date: {tariff['effective']}")
-    st.write(f"Source: {tariff['source']}")
-    st.markdown(f"[Open tariff order / schedule]({tariff['url']})")
-    st.caption(tariff["note"])
+if tariff is None:
 
-    if (
-        tariff["max_units"] is not None
-        and total_units > tariff["max_units"]
-    ):
-        st.error(
-            f"This configured tariff is valid only up to "
-            f"{tariff['max_units']} units. Your estimated usage is "
-            f"{total_units:.2f} units. A higher-consumption schedule "
-            "must be selected; the application will not extrapolate "
-            "the low-consumption tariff."
-        )
-        tariff = None
-
-if not tariff:
     st.warning(
-        "No verified automatic tariff is configured for this "
-        "connection/category/consumption. Configure the schedule "
-        "below using the current official tariff order."
-    )
-
-    st.subheader("Configure tariff slabs")
-
-    default_slabs = pd.DataFrame([
-        {"Upper limit (units)": 100.0, "Rate (₹/unit)": 3.0},
-        {"Upper limit (units)": 200.0, "Rate (₹/unit)": 5.0},
-        {"Upper limit (units)": 300.0, "Rate (₹/unit)": 7.0},
-        {"Upper limit (units)": 400.0, "Rate (₹/unit)": 8.0},
-        {"Upper limit (units)": 0.0, "Rate (₹/unit)": 9.0}
-    ])
-
-    st.caption(
-        "Replace the example values with the rates and boundaries "
-        "from the applicable official tariff order. Enter 0 as the "
-        "upper limit for the final unlimited slab."
-    )
-
-    configured_slabs = st.data_editor(
-        default_slabs,
-        key=f"tariff_editor_{state}_{discom}_{category}",
-        num_rows="dynamic",
-        hide_index=True,
-        use_container_width=True
-    )
-
-    slabs = []
-
-    for _, row in configured_slabs.iterrows():
-        upper = float(row["Upper limit (units)"])
-        rate = float(row["Rate (₹/unit)"])
-
-        if rate < 0 or upper < 0:
-            st.error("Tariff values cannot be negative.")
-            st.stop()
-
-        slabs.append({
-            "upper": None if upper == 0 else upper,
-            "rate": rate
-        })
-
-    # Require the unlimited slab to be last.
-    unlimited_positions = [
-        i for i, slab in enumerate(slabs)
-        if slab["upper"] is None
-    ]
-
-    if len(unlimited_positions) != 1 or unlimited_positions[0] != len(slabs) - 1:
-        st.error(
-            "The tariff must have exactly one unlimited final slab. "
-            "Set its upper limit to 0."
-        )
-        st.stop()
-
-    finite_limits = [
-        slab["upper"] for slab in slabs[:-1]
-    ]
-
-    if any(
-        finite_limits[i] <= finite_limits[i - 1]
-        for i in range(1, len(finite_limits))
-    ):
-        st.error("Slab upper limits must be in increasing order.")
-        st.stop()
-
-    tariff_fixed = st.number_input(
-        "Monthly fixed charge (₹)",
-        min_value=0.0,
-        value=0.0,
-        step=10.0,
-        key=f"fixed_{state}_{discom}"
-    )
-
-    tariff_source = st.text_input(
-        "Official tariff order source URL",
-        placeholder="Paste official regulator / DISCOM order URL"
-    )
-
-    tariff_effective = st.text_input(
-        "Tariff effective date",
-        placeholder="DD-MM-YYYY"
+        "Automatic tariff calculation is not currently available "
+        "for this connection category. Appliance consumption "
+        "analysis and other features are still available."
     )
 
 else:
-    slabs = tariff["slabs"]
-    tariff_fixed = float(tariff["fixed"])
-    tariff_source = tariff["url"]
-    tariff_effective = tariff["effective"]
-
-    st.info(
-        f"Configured fixed-charge reference: ₹{tariff_fixed:.2f}. "
-        "Confirm this against your connection's load and phase."
-    )
-
-# ==========================================================
-# STEP 5 - ADDITIONAL BILL COMPONENTS
-# ==========================================================
-
-st.divider()
-st.header("5. Duty, Adjustments and Subsidies")
-
-st.write(
-    "Only enter values supported by your applicable bill or "
-    "official notification. Unknown charges are not assumed to be zero."
-)
-
-duty_options = [
-    "Not included / Unknown",
-    "Percentage of energy charge",
-    "₹ per unit"
-]
-
-duty_type = st.selectbox(
-    "Electricity duty calculation",
-    duty_options
-)
-
-duty_value = 0.0
-
-if duty_type != "Not included / Unknown":
-    duty_value = st.number_input(
-        "Duty value",
-        min_value=0.0,
-        max_value=100.0,
-        value=0.0,
-        step=0.1,
-        help="Enter the value from the relevant notification or bill."
-    )
-
-adjustment_type = st.selectbox(
-    "Fuel / Power Purchase Adjustment",
-    [
-        "Not included / Unknown",
-        "₹ per unit",
-        "Percentage of energy charge"
-    ]
-)
-
-adjustment_value = 0.0
-
-if adjustment_type != "Not included / Unknown":
-    adjustment_value = st.number_input(
-        "Adjustment value",
-        min_value=0.0,
-        max_value=100.0,
-        value=0.0,
-        step=0.01
-    )
-
-other_charges = st.number_input(
-    "Other monthly charges (₹)",
-    min_value=0.0,
-    max_value=50000.0,
-    value=0.0,
-    step=10.0,
-    help="Meter rent, applicable surcharge, etc. Avoid duplicating charges."
-)
-
-subsidy = st.number_input(
-    "Eligible government subsidy / rebate (₹)",
-    min_value=0.0,
-    max_value=50000.0,
-    value=0.0,
-    step=10.0,
-    help="Enter only a subsidy for which the consumer is eligible."
-)
-
-if st.button("Calculate My Electricity Bill", type="primary", use_container_width=True):
 
     try:
-        result = calculate_bill(
+
+        bill = calculate_bill(
             total_units,
-            slabs,
-            tariff_fixed,
-            duty_type,
-            duty_value,
-            adjustment_type,
-            adjustment_value,
-            other_charges,
-            subsidy
+            tariff
         )
 
-        st.session_state["bill_result"] = result
-        st.session_state["bill_units"] = total_units
-        st.session_state["bill_state"] = state
-        st.session_state["bill_discom"] = discom
-        st.session_state["bill_source"] = tariff_source
-        st.session_state["bill_effective"] = tariff_effective
+        st.success(
+            "Applicable configured tariff selected automatically."
+        )
 
-    except ValueError as error:
-        st.error(str(error))
+        st.caption(
+            f"Tariff effective from {tariff['effective']}."
+        )
 
-# ==========================================================
-# STEP 6 - BILL RESULTS
-# ==========================================================
+        m1, m2 = st.columns(2)
 
-if "bill_result" in st.session_state:
-
-    result = st.session_state["bill_result"]
-
-    st.divider()
-    st.header("6. Your Estimated Electricity Bill")
-
-    st.metric(
-        "Estimated Total Bill",
-        f"₹{result['total']:,.2f}"
-    )
-
-    st.metric(
-        "Consumption",
-        f"{st.session_state['bill_units']:.2f} units"
-    )
-
-    bill_table = pd.DataFrame({
-        "Component": [
+        m1.metric(
             "Energy charges",
-            "Fixed charges",
-            "Electricity duty",
-            "Fuel / power purchase adjustment",
-            "Other charges",
-            "Government subsidy / rebate",
-            "Estimated payable amount"
-        ],
-        "Amount (₹)": [
-            result["energy"],
-            result["fixed"],
-            result["duty"],
-            result["adjustment"],
-            result["other"],
-            -result["subsidy"],
-            result["total"]
-        ]
-    })
+            f"₹{bill['energy']:,.2f}"
+        )
 
-    st.dataframe(
-        bill_table.round(2),
-        use_container_width=True,
-        hide_index=True
-    )
+        m2.metric(
+            "Estimated subtotal",
+            f"₹{bill['total']:,.2f}"
+        )
 
-    st.subheader("Tariff Slab Calculation")
+        st.subheader("Slab-wise Calculation")
 
-    if not result["slabs"].empty:
         st.dataframe(
-            result["slabs"].round(2),
+            bill["slabs"],
             use_container_width=True,
             hide_index=True
         )
 
-    st.caption(
-        f"State: {st.session_state['bill_state']} | "
-        f"DISCOM: {st.session_state['bill_discom']}"
-    )
-
-    st.caption(
-        f"Tariff source: {st.session_state['bill_source']} | "
-        f"Effective date: {st.session_state['bill_effective']}"
-    )
-
-    if duty_type == "Not included / Unknown":
-        st.warning(
-            "Electricity duty was not included because a verified "
-            "applicable value was not supplied."
+        st.info(
+            "This estimate includes the configured energy and fixed "
+            "charges only. Other charges, duties, adjustments, "
+            "subsidies and bill-specific items may change the final amount."
         )
 
-    if adjustment_type == "Not included / Unknown":
-        st.warning(
-            "Monthly fuel/power purchase adjustments were not included."
-        )
+    except (TariffUnavailable, ValueError) as error:
+
+        tariff_error = str(error)
+
+        st.warning(tariff_error)
+
 
 # ==========================================================
-# STEP 7 - APPLIANCE ANALYSIS
+# STEP 5 - APPLIANCE CONSUMPTION ANALYSIS
 # ==========================================================
 
 st.divider()
-st.header("7. Appliance Consumption Analysis")
-
-all_results["Energy Cost (₹)"] = (
-    all_results["Monthly Units"] *
-    (
-        result["energy"] / total_units
-        if "bill_result" in st.session_state and total_units > 0
-        else 0
-    )
-)
+st.header("5. Appliance Consumption Analysis")
 
 display_results = all_results.copy()
 
-display_results["Daily Units"] = display_results["Daily Units"].round(2)
-display_results["Monthly Units"] = display_results["Monthly Units"].round(2)
-display_results["Energy Cost (₹)"] = display_results["Energy Cost (₹)"].round(2)
+display_results["Daily Units"] = (
+    display_results["Daily Units"].round(2)
+)
+
+display_results["Monthly Units"] = (
+    display_results["Monthly Units"].round(2)
+)
 
 st.dataframe(
     display_results,
@@ -779,84 +775,292 @@ st.dataframe(
     hide_index=True
 )
 
-if total_units > 0:
+positive_results = all_results[
+    all_results["Monthly Units"] > 0
+].copy()
 
-    chart_data = all_results[
-        all_results["Monthly Units"] > 0
-    ]
+if not positive_results.empty:
 
-    fig, ax = plt.subplots(figsize=(9, 6))
+    col1, col2 = st.columns(2)
 
-    ax.pie(
-        chart_data["Monthly Units"],
-        labels=chart_data["Appliance"],
-        autopct="%1.1f%%",
-        startangle=140
-    )
+    with col1:
 
-    ax.set_title("Household Electricity Consumption")
-    st.pyplot(fig)
+        fig, ax = plt.subplots(figsize=(7, 5))
 
-    st.subheader("Top 5 Electricity Consumers")
-
-    top = chart_data.sort_values(
-        "Monthly Units",
-        ascending=False
-    ).head(5)
-
-    for _, row in top.iterrows():
-        share = row["Monthly Units"] / total_units * 100
-
-        st.write(
-            f"**{row['Appliance']}** — "
-            f"{row['Monthly Units']:.2f} units "
-            f"({share:.1f}%)"
+        ax.pie(
+            positive_results["Monthly Units"],
+            labels=positive_results["Appliance"],
+            autopct="%1.1f%%",
+            startangle=140
         )
 
+        ax.set_title("Household Electricity Consumption")
+
+        st.pyplot(fig)
+
+        plt.close(fig)
+
+    with col2:
+
+        top = positive_results.nlargest(
+            5,
+            "Monthly Units"
+        ).sort_values("Monthly Units")
+
+        fig, ax = plt.subplots(figsize=(7, 5))
+
+        ax.barh(
+            top["Appliance"],
+            top["Monthly Units"]
+        )
+
+        ax.set_xlabel("Monthly units (kWh)")
+        ax.set_title("Top 5 Electricity Consumers")
+
+        st.pyplot(fig)
+
+        plt.close(fig)
+
+
 # ==========================================================
-# STEP 8 - SAVINGS SIMULATOR
+# STEP 6 - SMART CONSUMPTION INSIGHTS
 # ==========================================================
 
 st.divider()
-st.header("8. Electricity Savings Simulator")
+st.header("6. Smart Consumption Insights")
+
+if not positive_results.empty:
+
+    biggest = positive_results.loc[
+        positive_results["Monthly Units"].idxmax()
+    ]
+
+    share = (
+        biggest["Monthly Units"] / total_units
+    ) * 100 if total_units > 0 else 0
+
+    st.info(
+        f"Your largest electricity consumer is **{biggest['Appliance']}**, "
+        f"using **{biggest['Monthly Units']:.2f} units** "
+        f"({share:.1f}% of your estimated consumption)."
+    )
+
+    high_hours = all_results[
+        all_results["Hours/day"] >= 12
+    ]
+
+    if not high_hours.empty:
+
+        st.warning(
+            "The following appliances are entered as running for "
+            "12 or more hours per day: "
+            + ", ".join(high_hours["Appliance"].astype(str))
+            + ". Check whether these usage hours are correct."
+        )
+
+    if daily_units > 10:
+
+        st.warning(
+            "Your estimated consumption exceeds 10 units per day. "
+            "Review high-wattage appliances and their usage hours."
+        )
+
+    elif daily_units < 1:
+
+        st.info(
+            "Your estimated consumption is below 1 unit per day. "
+            "Check whether all regularly used appliances are included."
+        )
+
+    st.subheader("Personalized Recommendations")
+
+    for _, row in positive_results.nlargest(
+        5,
+        "Monthly Units"
+    ).iterrows():
+
+        name = row["Appliance"].lower()
+
+        if "air conditioner" in name or name == "ac":
+
+            tip = (
+                "Use a moderate temperature, clean filters regularly "
+                "and keep doors/windows closed while cooling."
+            )
+
+        elif "geyser" in name or "water heater" in name:
+
+            tip = (
+                "Use a timer and switch it off after the required "
+                "heating period."
+            )
+
+        elif "refrigerator" in name:
+
+            tip = (
+                "Check door seals, maintain ventilation and avoid "
+                "frequent unnecessary opening."
+            )
+
+        elif "fan" in name:
+
+            tip = (
+                "Consider energy-efficient BLDC fans when replacing "
+                "older models."
+            )
+
+        elif "pump" in name:
+
+            tip = (
+                "Check for leaks and avoid unnecessary pumping."
+            )
+
+        elif "bulb" in name or "light" in name:
+
+            tip = (
+                "Use LED lights and switch off lights in unoccupied rooms."
+            )
+
+        else:
+
+            tip = (
+                "Review its daily operating hours and wattage. "
+                "Switch it off when it is not required."
+            )
+
+        st.write(f"**{row['Appliance']}:** {tip}")
+
+
+# ==========================================================
+# STEP 7 - SAVINGS SIMULATOR
+# ==========================================================
+
+st.divider()
+st.header("7. Electricity Savings Simulator")
 
 reduction = st.slider(
     "How much do you want to reduce consumption?",
-    0, 50, 10, 5
+    min_value=0,
+    max_value=50,
+    value=10,
+    step=5
 )
 
-new_units = total_units * (1 - reduction / 100)
+reduced_units = total_units * (
+    1 - reduction / 100
+)
 
-if "bill_result" in st.session_state:
+saved_units = total_units - reduced_units
 
-    new_bill_result = calculate_bill(
-        new_units,
-        slabs,
-        tariff_fixed,
-        duty_type,
-        duty_value,
-        adjustment_type,
-        adjustment_value,
-        other_charges,
-        subsidy
-    )
+s1, s2 = st.columns(2)
 
-    monthly_saving = (
-        result["total"] - new_bill_result["total"]
-    )
+s1.metric(
+    "Consumption after reduction",
+    f"{reduced_units:.2f} units"
+)
 
-    annual_saving = monthly_saving * 12
+s2.metric(
+    "Units saved",
+    f"{saved_units:.2f} units"
+)
 
-    c1, c2, c3 = st.columns(3)
+if tariff is not None:
 
-    c1.metric("New monthly units", f"{new_units:.2f}")
-    c2.metric("Monthly savings", f"₹{monthly_saving:,.2f}")
-    c3.metric("Annual savings", f"₹{annual_saving:,.2f}")
+    try:
 
-else:
-    st.info(
-        "Calculate your bill first to view the savings estimate."
-    )
+        old_energy, _ = calculate_slab_charges(
+            total_units,
+            tariff
+        )
+
+        new_energy, _ = calculate_slab_charges(
+            reduced_units,
+            tariff
+        )
+
+        st.metric(
+            "Estimated energy-charge savings",
+            f"₹{old_energy - new_energy:,.2f}"
+        )
+
+    except TariffUnavailable:
+
+        st.caption(
+            "Tariff-based savings are unavailable for this usage range."
+        )
+
+
+# ==========================================================
+# STEP 8 - ELECTRICITY BILL UPLOAD AND READING
+# ==========================================================
+
+st.divider()
+st.header("8. Upload Your Electricity Bill")
+
+st.write(
+    "Upload a PDF or a clear photograph of your electricity bill. "
+    "The app will try to extract units and the payable amount."
+)
+
+uploaded_file = st.file_uploader(
+    "Upload electricity bill",
+    type=["pdf", "png", "jpg", "jpeg"]
+)
+
+if uploaded_file is not None:
+
+    if st.button("Read Electricity Bill"):
+
+        try:
+
+            extracted_text = extract_bill_text(
+                uploaded_file
+            )
+
+            extracted_fields = parse_bill_fields(
+                extracted_text
+            )
+
+            st.session_state["ocr_text"] = extracted_text
+            st.session_state["ocr_fields"] = extracted_fields
+
+        except Exception as error:
+
+            st.error(str(error))
+
+    if "ocr_text" in st.session_state:
+
+        st.subheader("Extracted Bill Information")
+
+        st.text_area(
+            "Recognized bill text - verify before using",
+            st.session_state["ocr_text"],
+            height=180
+        )
+
+        fields = st.session_state.get(
+            "ocr_fields",
+            {}
+        )
+
+        if fields:
+
+            st.write("Detected values:")
+
+            st.json(fields)
+
+            st.warning(
+                "OCR may misread digits, decimal points and labels. "
+                "Always verify extracted values against your original bill."
+            )
+
+        else:
+
+            st.warning(
+                "The app could not reliably identify the bill values. "
+                "Enter the values manually in the comparison section."
+            )
+
 
 # ==========================================================
 # STEP 9 - ACTUAL BILL COMPARISON
@@ -865,38 +1069,66 @@ else:
 st.divider()
 st.header("9. Compare with Your Actual Electricity Bill")
 
-actual_bill = st.number_input(
-    "Enter actual payable amount from your electricity bill (₹)",
-    min_value=0.0,
-    value=0.0,
-    step=100.0
-)
+col1, col2 = st.columns(2)
 
-if actual_bill > 0 and "bill_result" in st.session_state:
+with col1:
 
-    difference = actual_bill - result["total"]
-
-    if difference > 0:
-        st.warning(
-            f"Your actual bill is ₹{difference:,.2f} higher "
-            "than this estimate."
-        )
-    elif difference < 0:
-        st.info(
-            f"Your actual bill is ₹{abs(difference):,.2f} lower "
-            "than this estimate."
-        )
-    else:
-        st.success("Your estimated bill matches your actual bill.")
-
-    st.caption(
-        "Differences can result from meter readings, billing days, "
-        "subsidies, arrears, adjustments, load-based charges and "
-        "other tariff conditions."
+    actual_units = st.number_input(
+        "Actual units from electricity bill",
+        min_value=0.0,
+        value=0.0,
+        step=1.0
     )
 
+with col2:
+
+    actual_amount = st.number_input(
+        "Actual payable amount (₹)",
+        min_value=0.0,
+        value=0.0,
+        step=50.0
+    )
+
+ocr_fields = st.session_state.get(
+    "ocr_fields",
+    {}
+)
+
+if ocr_fields:
+
+    st.caption(
+        "OCR suggestion — Units: "
+        + str(ocr_fields.get("units", "Not detected"))
+        + " | Amount: ₹"
+        + str(ocr_fields.get("amount", "Not detected"))
+    )
+
+if actual_units > 0:
+
+    difference = actual_units - total_units
+
+    st.metric(
+        "Actual units minus appliance estimate",
+        f"{difference:+.2f} units"
+    )
+
+if actual_amount > 0 and bill is not None:
+
+    difference = actual_amount - bill["total"]
+
+    st.metric(
+        "Actual bill minus estimated subtotal",
+        f"₹{difference:+,.2f}"
+    )
+
+    st.caption(
+        "This comparison is indicative. The estimated subtotal may "
+        "exclude statutory charges, adjustments, subsidies and arrears."
+    )
+
+
 # ==========================================================
-# STEP 10 - METER READING
+# STEP 10 - METER READING ANALYSIS
 # ==========================================================
 
 st.divider()
@@ -905,137 +1137,173 @@ st.header("10. Actual Meter Reading Analysis")
 m1, m2 = st.columns(2)
 
 with m1:
-    previous = st.number_input(
+
+    previous_reading = st.number_input(
         "Previous meter reading",
         min_value=0.0,
         value=0.0
     )
 
 with m2:
-    current = st.number_input(
+
+    current_reading = st.number_input(
         "Current meter reading",
         min_value=0.0,
         value=0.0
     )
 
-if current >= previous:
+if current_reading >= previous_reading:
 
-    meter_units = current - previous
+    meter_units = current_reading - previous_reading
 
     st.metric(
         "Actual meter consumption",
         f"{meter_units:.2f} units"
     )
 
-    if meter_units > 0:
-        difference = meter_units - total_units
-
-        st.write(
-            f"Difference between meter and appliance estimate: "
-            f"{difference:.2f} units"
-        )
+    st.write(
+        f"Difference between meter and appliance estimate: "
+        f"{meter_units - total_units:+.2f} units"
+    )
 
 else:
+
+    meter_units = 0.0
+
     st.error(
         "Current meter reading cannot be lower than previous reading."
     )
 
+
 # ==========================================================
-# STEP 11 - SMART RECOMMENDATIONS
+# STEP 11 - MONTHLY HISTORY
 # ==========================================================
 
 st.divider()
-st.header("11. Personalized Energy-Saving Recommendations")
+st.header("11. Monthly Electricity History")
 
-top_appliances = all_results.sort_values(
-    "Monthly Units",
-    ascending=False
+bill_month = st.date_input(
+    "Select bill month",
+    value=date.today().replace(day=1)
 )
 
-if not top_appliances.empty:
+if st.button(
+    "Save This Month's Audit",
+    type="primary"
+):
 
-    biggest = top_appliances.iloc[0]
+    record = {
+        "Saved At": datetime.now().isoformat(timespec="seconds"),
+        "Month": bill_month.strftime("%Y-%m"),
+        "State": state,
+        "DISCOM": discom,
+        "Billing Days": billing_days,
+        "Appliance Units": round(total_units, 2),
+        "Meter Units": round(meter_units, 2),
+        "Actual Bill (₹)": round(actual_amount, 2),
+        "Estimated Bill (₹)": (
+            round(bill["total"], 2)
+            if bill is not None
+            else None
+        )
+    }
 
-    st.info(
-        f"Your biggest electricity consumer is "
-        f"**{biggest['Appliance']}**, using "
-        f"**{biggest['Monthly Units']:.2f} units** "
-        "during the selected billing period."
+    save_history(record)
+
+    st.success("Your monthly electricity audit has been saved.")
+
+history = load_history()
+
+if not history.empty:
+
+    st.subheader("Saved Audit Records")
+
+    st.dataframe(
+        history,
+        use_container_width=True,
+        hide_index=True
     )
 
-    for _, row in top_appliances.head(5).iterrows():
+    if len(history) >= 2:
 
-        name = row["Appliance"].lower()
+        chart_history = history.copy()
 
-        if "air conditioner" in name or name == "ac":
-            st.write(
-                "❄️ AC: Use a moderate temperature, clean filters "
-                "regularly and close doors/windows while cooling."
+        chart_history["Appliance Units"] = pd.to_numeric(
+            chart_history["Appliance Units"],
+            errors="coerce"
+        )
+
+        chart_history = chart_history.dropna(
+            subset=["Appliance Units"]
+        )
+
+        if not chart_history.empty:
+
+            chart_history = chart_history.sort_values("Month")
+
+            st.subheader("Monthly Consumption Trend")
+
+            st.line_chart(
+                chart_history.set_index("Month")["Appliance Units"]
             )
 
-        elif "geyser" in name or "water heater" in name:
-            st.write(
-                "🚿 Geyser: Use a timer and avoid keeping it "
-                "switched on unnecessarily."
-            )
+    st.download_button(
+        "Download Monthly History (CSV)",
+        data=history.to_csv(index=False).encode("utf-8"),
+        file_name="electricity_monthly_history.csv",
+        mime="text/csv"
+    )
 
-        elif "refrigerator" in name:
-            st.write(
-                "🧊 Refrigerator: Maintain door seals and avoid "
-                "frequent unnecessary opening."
-            )
+else:
 
-        elif "fan" in name:
-            st.write(
-                "🌀 Fans: Consider energy-efficient BLDC fans "
-                "when replacing older models."
-            )
+    st.info(
+        "No saved monthly audits yet. Save an audit to start "
+        "tracking your household consumption."
+    )
 
-        elif "pump" in name:
-            st.write(
-                "🚰 Water pump: Check for leakage and avoid "
-                "unnecessary pumping."
-            )
-
-        elif "bulb" in name or "light" in name:
-            st.write(
-                "💡 Lighting: Use LED lights and switch off "
-                "unoccupied rooms."
-            )
 
 # ==========================================================
-# STEP 12 - DOWNLOAD REPORT
+# STEP 12 - DOWNLOAD REPORTS
 # ==========================================================
 
 st.divider()
 st.header("12. Download Your Energy Audit Report")
 
-report = all_results.copy()
-
-report["Daily Units"] = report["Daily Units"].round(3)
-report["Monthly Units"] = report["Monthly Units"].round(3)
-
-csv = report.to_csv(index=False).encode("utf-8")
+appliance_csv = all_results.to_csv(
+    index=False
+).encode("utf-8")
 
 st.download_button(
     "📥 Download Appliance Analysis (CSV)",
-    data=csv,
-    file_name="electricity_audit_report.csv",
+    data=appliance_csv,
+    file_name="electricity_appliance_analysis.csv",
     mime="text/csv",
     use_container_width=True
 )
 
-if "bill_result" in st.session_state:
+if bill is not None:
 
-    bill_csv = bill_table.to_csv(index=False).encode("utf-8")
+    bill_table = pd.DataFrame({
+        "Component": [
+            "Energy charges",
+            "Configured fixed charges",
+            "Estimated subtotal"
+        ],
+        "Amount (₹)": [
+            bill["energy"],
+            bill["fixed"],
+            bill["total"]
+        ]
+    })
 
     st.download_button(
         "📥 Download Estimated Bill (CSV)",
-        data=bill_csv,
+        data=bill_table.to_csv(index=False).encode("utf-8"),
         file_name="electricity_bill_estimate.csv",
         mime="text/csv",
         use_container_width=True
     )
+
 
 # ==========================================================
 # FOOTER
@@ -1053,20 +1321,12 @@ st.write(
     appliances and explore energy-saving opportunities.
 
     **Important:** This application is an estimation tool and is
-    not an official DISCOM billing system. The accuracy of the
-    estimate depends on the correctness and completeness of
-    appliance and tariff information.
+    not an official DISCOM billing system. Tariff coverage is limited
+    to configured schedules. The final amount on an electricity bill
+    may include additional charges, duties, subsidies and adjustments.
     """
 )
 
-st.markdown(
-    """
-    **Official reference resources:**
-
-    - [Central Electricity Authority – Tariff and Duty Reports](https://cea.nic.in/financial-studies-assistance-division/)
-    - [Andhra Pradesh Electricity Regulatory Commission](https://aperc.gov.in/page/Tariff_Orders)
-    - [Telangana Electricity Regulatory Commission](https://www.tgerc.telangana.gov.in/tariffschdule.php)
-    """
+st.caption(
+    "Smart Home Electricity Auditor | Community Service Project"
 )
-
-st.caption("Smart Home Electricity Auditor | Community Service Project")
