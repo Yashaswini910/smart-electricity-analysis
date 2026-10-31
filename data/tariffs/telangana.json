@@ -1,0 +1,31 @@
+
+[
+  {
+    "state": "Telangana",
+    "discom": "TGSPDCL",
+    "category": "Domestic - General",
+    "effective_date": "2026-04-01",
+    "verified": false,
+    "verification_note": "Verify slab limits and all applicable charges against the current TGERC order.",
+    "slabs": [
+      {"upper": 50, "rate": 1.95},
+      {"upper": 100, "rate": 3.10}
+    ],
+    "fixed_charge": 10.0,
+    "max_units": 100
+  },
+  {
+    "state": "Telangana",
+    "discom": "TGNPDCL",
+    "category": "Domestic - General",
+    "effective_date": "2026-04-01",
+    "verified": false,
+    "verification_note": "Verify slab limits and all applicable charges against the current TGERC order.",
+    "slabs": [
+      {"upper": 50, "rate": 1.95},
+      {"upper": 100, "rate": 3.10}
+    ],
+    "fixed_charge": 10.0,
+    "max_units": 100
+  }
+]
