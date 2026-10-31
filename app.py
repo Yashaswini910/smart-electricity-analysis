@@ -4,7 +4,7 @@ from io import BytesIO
 
 import matplotlib.pyplot as plt
 import pandas as pd
-import pytesseract
+
 import streamlit as st
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
