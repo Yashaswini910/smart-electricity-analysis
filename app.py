@@ -1,307 +1,615 @@
-import re
-from datetime import datetime
-from io import BytesIO
-
-import matplotlib.pyplot as plt
-import pandas as pd
-
 import streamlit as st
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+import pandas as pd
+import matplotlib.pyplot as plt
 
 
 # ============================================================
-# PAGE CONFIG
+# PAGE CONFIGURATION
 # ============================================================
 
 st.set_page_config(
     page_title="Smart Home Electricity Auditor",
     page_icon="⚡",
-    layout="centered",
-)
-
-st.title("⚡ Smart Home Electricity Auditor")
-st.markdown("### *Measure • Understand • Save*")
-st.write(
-    "Estimate household electricity consumption, analyze an actual electricity "
-    "bill from a photo, identify the biggest energy consumers, and simulate "
-    "practical savings."
-)
-
-st.info(
-    "📌 This is an independent estimation/analysis tool. It does not replace "
-    "the official bill issued by your electricity provider."
+    layout="centered"
 )
 
 
 # ============================================================
-# DATA
+# INDIA - DISCOM DATA
 # ============================================================
 
 DISCOMS = {
-    "Andhra Pradesh": ["APSPDCL", "APEPDCL", "Other / Not Sure"],
-    "Assam": ["APDCL", "Other / Not Sure"],
-    "Bihar": ["NBPDCL", "SBPDCL", "Other / Not Sure"],
-    "Chhattisgarh": ["CSPDCL", "Other / Not Sure"],
+
+    "Andhra Pradesh": [
+        "APSPDCL",
+        "APEPDCL",
+        "Other / Not Sure"
+    ],
+
+    "Assam": [
+        "APDCL",
+        "Other / Not Sure"
+    ],
+
+    "Bihar": [
+        "NBPDCL",
+        "SBPDCL",
+        "Other / Not Sure"
+    ],
+
+    "Chhattisgarh": [
+        "CSPDCL",
+        "Other / Not Sure"
+    ],
+
     "Delhi": [
         "BSES Rajdhani Power Limited (BRPL)",
         "BSES Yamuna Power Limited (BYPL)",
         "Tata Power Delhi Distribution Limited (TPDDL)",
         "NDMC",
-        "Other / Not Sure",
+        "Other / Not Sure"
     ],
-    "Gujarat": ["DGVCL", "MGVCL", "PGVCL", "UGVCL", "Torrent Power", "Other / Not Sure"],
-    "Haryana": ["DHBVN", "UHBVN", "Other / Not Sure"],
-    "Himachal Pradesh": ["HPSEBL", "Other / Not Sure"],
-    "Jharkhand": ["JBVNL", "Other / Not Sure"],
-    "Karnataka": ["BESCOM", "HESCOM", "GESCOM", "MESCOM", "CESCOM", "Other / Not Sure"],
-    "Kerala": ["KSEB", "Other / Not Sure"],
-    "Madhya Pradesh": ["MPPKVVCL", "MPEZ", "MPMKVVCL", "Other / Not Sure"],
-    "Maharashtra": ["MSEDCL", "BEST", "Adani Electricity", "Tata Power", "Other / Not Sure"],
-    "Odisha": ["TPCODL", "TPNODL", "TPWODL", "TPSODL", "Other / Not Sure"],
-    "Punjab": ["PSPCL", "Other / Not Sure"],
-    "Rajasthan": ["JVVNL", "AVVNL", "JDVVNL", "Other / Not Sure"],
-    "Tamil Nadu": ["TNPDCL / TANGEDCO", "Other / Not Sure"],
-    "Telangana": ["TGSPDCL", "TGNPDCL", "Other / Not Sure"],
-    "Uttar Pradesh": ["PVVNL", "MVVNL", "DVVNL", "PuVVNL", "KESCO", "Other / Not Sure"],
-    "Uttarakhand": ["UPCL", "Other / Not Sure"],
-    "West Bengal": ["WBSEDCL", "CESC", "Other / Not Sure"],
-    "Goa": ["Electricity Department, Goa", "Other / Not Sure"],
-    "Other State / Union Territory": ["Other / Not Sure"],
+
+    "Gujarat": [
+        "DGVCL",
+        "MGVCL",
+        "PGVCL",
+        "UGVCL",
+        "Torrent Power",
+        "Other / Not Sure"
+    ],
+
+    "Haryana": [
+        "DHBVN",
+        "UHBVN",
+        "Other / Not Sure"
+    ],
+
+    "Himachal Pradesh": [
+        "HPSEBL",
+        "Other / Not Sure"
+    ],
+
+    "Jharkhand": [
+        "JBVNL",
+        "Other / Not Sure"
+    ],
+
+    "Karnataka": [
+        "BESCOM",
+        "HESCOM",
+        "GESCOM",
+        "MESCOM",
+        "CESCOM",
+        "Other / Not Sure"
+    ],
+
+    "Kerala": [
+        "KSEB",
+        "Other / Not Sure"
+    ],
+
+    "Madhya Pradesh": [
+        "MPPKVVCL",
+        "MPEZ",
+        "MPMKVVCL",
+        "Other / Not Sure"
+    ],
+
+    "Maharashtra": [
+        "MSEDCL",
+        "BEST",
+        "Adani Electricity",
+        "Tata Power",
+        "Other / Not Sure"
+    ],
+
+    "Odisha": [
+        "TPCODL",
+        "TPNODL",
+        "TPWODL",
+        "TPSODL",
+        "Other / Not Sure"
+    ],
+
+    "Punjab": [
+        "PSPCL",
+        "Other / Not Sure"
+    ],
+
+    "Rajasthan": [
+        "JVVNL",
+        "AVVNL",
+        "JDVVNL",
+        "Other / Not Sure"
+    ],
+
+    "Tamil Nadu": [
+        "TNPDCL / TANGEDCO",
+        "Other / Not Sure"
+    ],
+
+    "Telangana": [
+        "TGSPDCL",
+        "TGNPDCL",
+        "Other / Not Sure"
+    ],
+
+    "Uttar Pradesh": [
+        "PVVNL",
+        "MVVNL",
+        "DVVNL",
+        "PuVVNL",
+        "KESCO",
+        "Other / Not Sure"
+    ],
+
+    "Uttarakhand": [
+        "UPCL",
+        "Other / Not Sure"
+    ],
+
+    "West Bengal": [
+        "WBSEDCL",
+        "CESC",
+        "Other / Not Sure"
+    ],
+
+    "Goa": [
+        "Electricity Department, Goa",
+        "Other / Not Sure"
+    ],
+
+    "Other State / Union Territory": [
+        "Other / Not Sure"
+    ]
 }
+
+
+# ============================================================
+# REGIONAL DUTY/TAX REFERENCE
+# ============================================================
+#
+# IMPORTANT:
+# These are reference duty/tax components from the CEA
+# Electricity Tariff & Duty publication, March 2026.
+#
+# They should NOT be interpreted as universal current tax
+# rates for every consumer.
+#
+# Actual duty/tax can vary with:
+# - consumption
+# - consumer category
+# - utility
+# - tariff order
+# - subsidies
+# - local rules
+#
+# Therefore the app allows the user to override the value
+# using the duty/tax shown on their bill.
+#
+# Values below are approximate reference ₹/kWh components
+# based on the CEA domestic reference table.
+# ============================================================
+
+REGIONAL_DUTY_REFERENCE = {
+
+    "Andhra Pradesh": 0.06,
+    "Arunachal Pradesh": 0.00,
+    "Assam": 0.42,
+    "Bihar": 0.58,
+    "Chandigarh": 0.09,
+    "Chhattisgarh": 0.72,
+    "Dadra & Nagar Haveli and Daman & Diu": 0.00,
+    "Delhi": 0.28,
+    "Goa": 0.20,
+    "Gujarat": 0.74,
+    "Haryana": 0.25,
+    "Himachal Pradesh": 0.28,
+    "Jammu & Kashmir": 0.00,
+    "Jharkhand": 0.41,
+    "Karnataka": 0.52,
+    "Kerala": 0.92,
+    "Ladakh": 0.56,
+    "Lakshadweep": 0.00,
+    "Madhya Pradesh": 1.11,
+    "Maharashtra": 2.59,
+    "Manipur": 0.00,
+    "Meghalaya": 0.05,
+    "Mizoram": 0.00,
+    "Nagaland": 0.00,
+    "Odisha": 0.23,
+    "Puducherry": 0.00,
+    "Punjab": 1.10,
+    "Rajasthan": 0.55,
+    "Sikkim": 0.00,
+    "Tamil Nadu": 0.00,
+    "Telangana": 0.06,
+    "Tripura": 0.44,
+    "Uttar Pradesh": 0.37,
+    "Uttarakhand": 0.15,
+    "West Bengal": 0.89,
+
+    "Other State / Union Territory": 0.00
+}
+
+
+# ============================================================
+# COMMON APPLIANCES
+# ============================================================
 
 COMMON_APPLIANCES = [
-    {"Appliance": "❄️ Air Conditioner", "Quantity": 1, "Wattage (W)": 1500, "Hours/day": 4.0},
-    {"Appliance": "🧊 Refrigerator", "Quantity": 1, "Wattage (W)": 150, "Hours/day": 10.0},
-    {"Appliance": "📺 Television", "Quantity": 1, "Wattage (W)": 150, "Hours/day": 3.0},
-    {"Appliance": "💡 LED Bulb", "Quantity": 6, "Wattage (W)": 9, "Hours/day": 6.0},
-    {"Appliance": "🌀 Ceiling Fan", "Quantity": 4, "Wattage (W)": 75, "Hours/day": 8.0},
-    {"Appliance": "🚿 Geyser", "Quantity": 1, "Wattage (W)": 2000, "Hours/day": 0.5},
-    {"Appliance": "🧺 Washing Machine", "Quantity": 1, "Wattage (W)": 500, "Hours/day": 0.5},
-    {"Appliance": "💻 Laptop", "Quantity": 1, "Wattage (W)": 65, "Hours/day": 5.0},
-    {"Appliance": "🚰 Water Pump", "Quantity": 1, "Wattage (W)": 750, "Hours/day": 0.5},
-    {"Appliance": "🍳 Induction Stove", "Quantity": 1, "Wattage (W)": 1800, "Hours/day": 0.5},
-    {"Appliance": "🍲 Microwave", "Quantity": 1, "Wattage (W)": 1200, "Hours/day": 0.3},
+
+    {
+        "Appliance": "❄️ Air Conditioner",
+        "Quantity": 1,
+        "Wattage (W)": 1500,
+        "Hours/day": 4.0
+    },
+
+    {
+        "Appliance": "🧊 Refrigerator",
+        "Quantity": 1,
+        "Wattage (W)": 150,
+        "Hours/day": 10.0
+    },
+
+    {
+        "Appliance": "📺 Television",
+        "Quantity": 1,
+        "Wattage (W)": 150,
+        "Hours/day": 3.0
+    },
+
+    {
+        "Appliance": "💡 LED Bulb",
+        "Quantity": 6,
+        "Wattage (W)": 9,
+        "Hours/day": 6.0
+    },
+
+    {
+        "Appliance": "🌀 Ceiling Fan",
+        "Quantity": 4,
+        "Wattage (W)": 75,
+        "Hours/day": 8.0
+    },
+
+    {
+        "Appliance": "🚿 Geyser",
+        "Quantity": 1,
+        "Wattage (W)": 2000,
+        "Hours/day": 0.5
+    },
+
+    {
+        "Appliance": "🧺 Washing Machine",
+        "Quantity": 1,
+        "Wattage (W)": 500,
+        "Hours/day": 0.5
+    },
+
+    {
+        "Appliance": "💻 Laptop",
+        "Quantity": 1,
+        "Wattage (W)": 65,
+        "Hours/day": 5.0
+    },
+
+    {
+        "Appliance": "🚰 Water Pump",
+        "Quantity": 1,
+        "Wattage (W)": 750,
+        "Hours/day": 0.5
+    },
+
+    {
+        "Appliance": "🍳 Induction Stove",
+        "Quantity": 1,
+        "Wattage (W)": 1800,
+        "Hours/day": 0.5
+    },
+
+    {
+        "Appliance": "🍲 Microwave",
+        "Quantity": 1,
+        "Wattage (W)": 1200,
+        "Hours/day": 0.3
+    }
 ]
 
-STANDBY_WATTS = {
-    "TV": 1.0,
-    "Set-top Box": 5.0,
-    "Laptop Charger": 1.0,
-    "Desktop Computer": 3.0,
-    "Gaming Console": 2.0,
-    "Microwave": 3.0,
-    "Wi-Fi Router": 8.0,
-    "Printer": 2.0,
-}
+
+# ============================================================
+# HEADER
+# ============================================================
+
+st.title("⚡ Smart Home Electricity Auditor")
+
+st.markdown(
+    "### *Calculate, Analyze, and Reduce Your Electricity Bill*"
+)
+
+st.write(
+    "Enter your household appliances, add your own appliances, "
+    "select your electricity region and DISCOM, and estimate "
+    "your monthly electricity consumption and cost."
+)
+
+st.info(
+    "💡 For better accuracy, enter the actual wattage printed "
+    "on your appliance label or specification sheet."
+)
 
 
 # ============================================================
-# BILL OCR HELPERS
+# STEP 1 — REGION
 # ============================================================
 
-def preprocess_bill_image(image: Image.Image) -> Image.Image:
-    """Prepare a bill photo for OCR."""
-    img = image.convert("L")
-    img = ImageOps.autocontrast(img)
-    img = img.resize((img.width * 2, img.height * 2))
-    img = ImageEnhance.Contrast(img).enhance(1.8)
-    img = ImageEnhance.Sharpness(img).enhance(1.5)
-    img = img.filter(ImageFilter.SHARPEN)
-    return img
+st.write("---")
+
+st.header("🇮🇳 Step 1: Electricity Connection Details")
+
+states = list(DISCOMS.keys())
+
+state = st.selectbox(
+    "Select your State / Union Territory:",
+    states,
+    index=states.index("Telangana")
+)
+
+available_discoms = DISCOMS[state]
+
+discom = st.selectbox(
+    "Select your DISCOM / Electricity Provider:",
+    available_discoms
+)
+
+area_type = st.radio(
+    "Area type:",
+    ["Urban", "Rural"],
+    horizontal=True
+)
 
 
-def ocr_bill(image: Image.Image) -> tuple[str, float]:
-    """
-    OCR with confidence estimate.
-    Returns (text, mean confidence).
-    """
-    processed = preprocess_bill_image(image)
+# ============================================================
+# TARIFF INPUT
+# ============================================================
 
-    data = pytesseract.image_to_data(
-        processed,
-        config="--psm 6",
-        output_type=pytesseract.Output.DICT,
+st.subheader("💰 Tariff Information")
+
+st.write(
+    "Your electricity tariff depends on the DISCOM, consumer "
+    "category and applicable tariff order. For the most useful "
+    "estimate, enter the energy rate shown on your electricity bill."
+)
+
+energy_rate = st.number_input(
+    "Energy Charge / Average Energy Rate (₹ per kWh)",
+    min_value=0.0,
+    max_value=50.0,
+    value=6.50,
+    step=0.10,
+    help=(
+        "Look for Energy Charges / Energy Rate on your electricity bill."
+    )
+)
+
+fixed_charge = st.number_input(
+    "Monthly Fixed Charge (₹)",
+    min_value=0.0,
+    max_value=10000.0,
+    value=150.0,
+    step=10.0,
+    help="Enter the fixed/customer charge from your electricity bill."
+)
+
+
+# ============================================================
+# REGIONAL DUTY
+# ============================================================
+
+reference_duty = REGIONAL_DUTY_REFERENCE.get(
+    state,
+    0.0
+)
+
+st.subheader("🏛️ Regional Electricity Duty / Tax")
+
+st.write(
+    f"Reference duty/tax component for **{state}**: "
+    f"₹{reference_duty:.2f} per kWh"
+)
+
+use_reference_duty = st.checkbox(
+    "Use the regional reference duty/tax automatically",
+    value=True
+)
+
+if use_reference_duty:
+
+    duty_per_unit = reference_duty
+
+else:
+
+    duty_per_unit = st.number_input(
+        "Enter electricity duty / tax from your bill (₹ per kWh):",
+        min_value=0.0,
+        max_value=20.0,
+        value=float(reference_duty),
+        step=0.01
     )
 
-    words = []
-    confidences = []
-
-    for text, conf in zip(data["text"], data["conf"]):
-        text = text.strip()
-        try:
-            conf_value = float(conf)
-        except (ValueError, TypeError):
-            conf_value = -1
-
-        if text:
-            words.append(text)
-
-        if conf_value >= 0:
-            confidences.append(conf_value)
-
-    extracted_text = " ".join(words)
-    mean_conf = sum(confidences) / len(confidences) if confidences else 0.0
-
-    return extracted_text, mean_conf
+st.caption(
+    "The regional duty/tax values are reference values derived "
+    "from CEA's March 2026 tariff/duty publication. Actual "
+    "consumer charges can differ by tariff category, consumption "
+    "level, utility and current tariff order."
+)
 
 
-def clean_number(value: str):
-    """Convert OCR number text such as 1,234.50 into float."""
-    if not value:
-        return None
+# ============================================================
+# STEP 2 — COMMON APPLIANCES
+# ============================================================
 
-    value = value.replace(",", "").replace("₹", "").replace("Rs.", "").replace("Rs", "")
-    match = re.search(r"\d+(?:\.\d+)?", value)
+st.write("---")
 
-    if not match:
-        return None
+st.header("🔌 Step 2: Common Appliance Usage")
 
-    try:
-        return float(match.group())
-    except ValueError:
-        return None
+st.write(
+    "Change the quantity, wattage and daily operating hours "
+    "to match your actual household."
+)
 
+common_df = pd.DataFrame(COMMON_APPLIANCES)
 
-def extract_first_number_after(text: str, patterns: list[str]):
-    """Find a number appearing near one of the supplied labels."""
-    for pattern in patterns:
-        match = re.search(
-            pattern + r".{0,100}?(\d[\d,]*(?:\.\d+)?)",
-            text,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        if match:
-            return clean_number(match.group(1))
-    return None
+common_df = st.data_editor(
+    common_df,
+    use_container_width=True,
+    hide_index=True,
+    num_rows="fixed",
 
+    column_config={
 
-def extract_units(text: str):
-    patterns = [
-        r"(?:units?\s*consumed)",
-        r"(?:consumption)",
-        r"(?:energy\s*consumption)",
-        r"(?:kwh)",
-        r"(?:units)",
-    ]
-    return extract_first_number_after(text, patterns)
+        "Appliance":
+            st.column_config.TextColumn(
+                "Appliance",
+                disabled=True
+            ),
 
+        "Quantity":
+            st.column_config.NumberColumn(
+                "Quantity",
+                min_value=0,
+                max_value=100,
+                step=1
+            ),
 
-def extract_bill_amount(text: str):
-    patterns = [
-        r"(?:net\s*amount\s*payable)",
-        r"(?:amount\s*payable)",
-        r"(?:total\s*amount)",
-        r"(?:bill\s*amount)",
-        r"(?:grand\s*total)",
-        r"(?:total\s*bill)",
-    ]
-    return extract_first_number_after(text, patterns)
+        "Wattage (W)":
+            st.column_config.NumberColumn(
+                "Wattage (W)",
+                min_value=0,
+                max_value=50000,
+                step=1
+            ),
 
-
-def extract_energy_charge(text: str):
-    patterns = [
-        r"(?:energy\s*charges?)",
-        r"(?:energy\s*charge)",
-        r"(?:units?\s*charges?)",
-    ]
-    return extract_first_number_after(text, patterns)
-
-
-def extract_fixed_charge(text: str):
-    patterns = [
-        r"(?:fixed\s*charges?)",
-        r"(?:customer\s*charges?)",
-        r"(?:service\s*charges?)",
-    ]
-    return extract_first_number_after(text, patterns)
-
-
-def extract_duty(text: str):
-    patterns = [
-        r"(?:electricity\s*duty)",
-        r"(?:electricity\s*tax)",
-        r"(?:duty\s*/?\s*tax)",
-        r"(?:tax)",
-        r"(?:duty)",
-    ]
-    return extract_first_number_after(text, patterns)
-
-
-def extract_meter_readings(text: str):
-    previous = extract_first_number_after(
-        text,
-        [
-            r"(?:previous\s*reading)",
-            r"(?:prev\.?\s*reading)",
-            r"(?:previous\s*meter)",
-            r"(?:old\s*reading)",
-        ],
-    )
-
-    current = extract_first_number_after(
-        text,
-        [
-            r"(?:current\s*reading)",
-            r"(?:present\s*reading)",
-            r"(?:current\s*meter)",
-            r"(?:new\s*reading)",
-        ],
-    )
-
-    return previous, current
-
-
-def extract_due_date(text: str):
-    patterns = [
-        r"(?:due\s*date)\s*[:\-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})",
-        r"(?:pay\s*by)\s*[:\-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})",
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if match:
-            return match.group(1)
-
-    return None
-
-
-def parse_bill(image: Image.Image):
-    text, confidence = ocr_bill(image)
-
-    previous, current = extract_meter_readings(text)
-
-    return {
-        "ocr_text": text,
-        "ocr_confidence": confidence,
-        "units": extract_units(text),
-        "bill_amount": extract_bill_amount(text),
-        "energy_charge": extract_energy_charge(text),
-        "fixed_charge": extract_fixed_charge(text),
-        "duty": extract_duty(text),
-        "previous_reading": previous,
-        "current_reading": current,
-        "due_date": extract_due_date(text),
+        "Hours/day":
+            st.column_config.NumberColumn(
+                "Hours/day",
+                min_value=0.0,
+                max_value=24.0,
+                step=0.5
+            )
     }
+)
 
 
 # ============================================================
-# APPLIANCE CALCULATION
+# STEP 3 — CUSTOM APPLIANCES
 # ============================================================
 
-def calculate_appliance_units(df: pd.DataFrame) -> pd.DataFrame:
+st.write("---")
+
+st.header("➕ Step 3: Add Your Own Appliances")
+
+st.write(
+    "Add any appliance that is not already listed."
+)
+
+custom_default = pd.DataFrame(
+    [
+        {
+            "Appliance": "",
+            "Quantity": 1,
+            "Wattage (W)": 100,
+            "Hours/day": 1.0
+        }
+    ]
+)
+
+custom_df = st.data_editor(
+    custom_default,
+    use_container_width=True,
+    hide_index=True,
+    num_rows="dynamic",
+
+    column_config={
+
+        "Appliance":
+            st.column_config.TextColumn(
+                "Appliance Name",
+                help=(
+                    "Examples: Iron, Air Cooler, Desktop PC, "
+                    "EV Charger, Hair Dryer, Water Purifier"
+                )
+            ),
+
+        "Quantity":
+            st.column_config.NumberColumn(
+                "Quantity",
+                min_value=0,
+                max_value=100,
+                step=1
+            ),
+
+        "Wattage (W)":
+            st.column_config.NumberColumn(
+                "Wattage (W)",
+                min_value=0,
+                max_value=50000,
+                step=1
+            ),
+
+        "Hours/day":
+            st.column_config.NumberColumn(
+                "Hours/day",
+                min_value=0.0,
+                max_value=24.0,
+                step=0.5
+            )
+    }
+)
+
+
+# ============================================================
+# CALCULATION FUNCTION
+# ============================================================
+
+def calculate_appliance_units(df):
+
     results = []
 
     for _, row in df.iterrows():
-        appliance = str(row["Appliance"]).strip()
 
-        if not appliance or appliance.lower() == "nan":
+        appliance = str(
+            row["Appliance"]
+        ).strip()
+
+        if appliance == "":
             continue
 
-        quantity = max(0.0, float(row["Quantity"]))
-        wattage = max(0.0, float(row["Wattage (W)"]))
-        hours = min(24.0, max(0.0, float(row["Hours/day"])))
+        quantity = float(
+            row["Quantity"]
+        )
 
-        monthly_units = quantity * wattage * hours * 30 / 1000
+        wattage = float(
+            row["Wattage (W)"]
+        )
+
+        hours = float(
+            row["Hours/day"]
+        )
+
+        daily_kwh = (
+            quantity *
+            wattage *
+            hours /
+            1000
+        )
+
+        monthly_kwh = (
+            daily_kwh *
+            30
+        )
 
         results.append(
             {
@@ -309,25 +617,356 @@ def calculate_appliance_units(df: pd.DataFrame) -> pd.DataFrame:
                 "Quantity": quantity,
                 "Wattage (W)": wattage,
                 "Hours/day": hours,
-                "Monthly Units (kWh)": monthly_units,
+                "Monthly Units (kWh)": monthly_kwh
             }
         )
 
     return pd.DataFrame(results)
 
 
-def safe_float(value, default=0.0):
-    try:
-        if value is None or pd.isna(value):
-            return default
-        return float(value)
-    except (ValueError, TypeError):
-        return default
+# ============================================================
+# CALCULATE USAGE
+# ============================================================
+
+common_results = calculate_appliance_units(
+    common_df
+)
+
+custom_results = calculate_appliance_units(
+    custom_df
+)
+
+all_results = pd.concat(
+    [
+        common_results,
+        custom_results
+    ],
+    ignore_index=True
+)
+
+
+if len(all_results) > 0:
+
+    all_results["Energy Cost (₹)"] = (
+        all_results["Monthly Units (kWh)"]
+        *
+        energy_rate
+    )
+
+    total_monthly_units = (
+        all_results["Monthly Units (kWh)"]
+        .sum()
+    )
+
+else:
+
+    total_monthly_units = 0
 
 
 # ============================================================
-# SMART INSIGHT ENGINE
+# BILL CALCULATION
 # ============================================================
+
+energy_charge = (
+    total_monthly_units *
+    energy_rate
+)
+
+electricity_duty = (
+    total_monthly_units *
+    duty_per_unit
+)
+
+estimated_bill = (
+    energy_charge +
+    electricity_duty +
+    fixed_charge
+)
+
+
+# ============================================================
+# STEP 4 — RESULTS
+# ============================================================
+
+st.write("---")
+
+st.header("📊 Step 4: Your Personalized Energy Report")
+
+
+c1, c2, c3 = st.columns(3)
+
+c1.metric(
+    "Monthly Consumption",
+    f"{total_monthly_units:.1f} kWh"
+)
+
+c2.metric(
+    "Energy Charge",
+    f"₹{energy_charge:,.0f}"
+)
+
+c3.metric(
+    "Estimated Bill",
+    f"₹{estimated_bill:,.0f}"
+)
+
+
+# ============================================================
+# BILL BREAKDOWN
+# ============================================================
+
+st.subheader("💰 Estimated Bill Breakdown")
+
+bill_breakdown = pd.DataFrame(
+    {
+        "Bill Component": [
+            "Energy Charges",
+            "Fixed Charge",
+            "Electricity Duty / Tax",
+            "Estimated Total"
+        ],
+
+        "Amount (₹)": [
+            energy_charge,
+            fixed_charge,
+            electricity_duty,
+            estimated_bill
+        ]
+    }
+)
+
+st.dataframe(
+    bill_breakdown,
+    use_container_width=True,
+    hide_index=True
+)
+
+st.caption(
+    f"State: {state} | "
+    f"DISCOM: {discom} | "
+    f"Area: {area_type}"
+)
+
+
+# ============================================================
+# APPLIANCE ANALYSIS
+# ============================================================
+
+st.subheader("🔌 Appliance-by-Appliance Analysis")
+
+if len(all_results) > 0:
+
+    display_df = all_results.copy()
+
+    display_df[
+        "Monthly Units (kWh)"
+    ] = display_df[
+        "Monthly Units (kWh)"
+    ].round(2)
+
+    display_df[
+        "Energy Cost (₹)"
+    ] = display_df[
+        "Energy Cost (₹)"
+    ].round(2)
+
+    st.dataframe(
+        display_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+# ============================================================
+# PIE CHART
+# ============================================================
+
+st.subheader("💡 Where Is Your Electricity Going?")
+
+if total_monthly_units > 0:
+
+    chart_df = all_results[
+        all_results[
+            "Monthly Units (kWh)"
+        ] > 0
+    ].copy()
+
+    fig, ax = plt.subplots(
+        figsize=(8, 6)
+    )
+
+    ax.pie(
+        chart_df[
+            "Monthly Units (kWh)"
+        ],
+
+        labels=chart_df[
+            "Appliance"
+        ],
+
+        autopct="%1.1f%%",
+
+        startangle=140,
+
+        wedgeprops={
+            "edgecolor": "black",
+            "linewidth": 0.8
+        }
+    )
+
+    ax.set_title(
+        "Monthly Electricity Consumption"
+    )
+
+    st.pyplot(fig)
+
+else:
+
+    st.info(
+        "Enter appliance usage to generate the chart."
+    )
+
+
+# ============================================================
+# TOP CONSUMERS
+# ============================================================
+
+if total_monthly_units > 0:
+
+    st.subheader(
+        "🚨 Your Biggest Electricity Consumers"
+    )
+
+    top_consumers = (
+        all_results
+        .sort_values(
+            "Monthly Units (kWh)",
+            ascending=False
+        )
+        .head(5)
+    )
+
+    for _, row in top_consumers.iterrows():
+
+        percentage = (
+            row["Monthly Units (kWh)"]
+            /
+            total_monthly_units
+        ) * 100
+
+        st.write(
+            f"**{row['Appliance']}** — "
+            f"{row['Monthly Units (kWh)']:.1f} kWh/month "
+            f"({percentage:.1f}%)"
+        )
+
+
+# ============================================================
+# SAVINGS SIMULATOR
+# ============================================================
+
+st.write("---")
+
+st.header("🌱 Step 5: Savings Simulator")
+
+st.write(
+    "See what happens if you reduce your electricity consumption."
+)
+
+reduction_percent = st.slider(
+    "Reduce your consumption by:",
+    min_value=0,
+    max_value=50,
+    value=10,
+    step=5
+)
+
+reduced_units = (
+    total_monthly_units *
+    reduction_percent /
+    100
+)
+
+new_units = (
+    total_monthly_units -
+    reduced_units
+)
+
+new_energy_charge = (
+    new_units *
+    energy_rate
+)
+
+new_duty = (
+    new_units *
+    duty_per_unit
+)
+
+new_bill = (
+    new_energy_charge +
+    new_duty +
+    fixed_charge
+)
+
+monthly_saving = (
+    estimated_bill -
+    new_bill
+)
+
+annual_saving = (
+    monthly_saving *
+    12
+)
+
+
+s1, s2, s3 = st.columns(3)
+
+s1.metric(
+    "New Monthly Usage",
+    f"{new_units:.1f} kWh"
+)
+
+s2.metric(
+    "Monthly Saving",
+    f"₹{monthly_saving:,.0f}"
+)
+
+s3.metric(
+    "Annual Saving",
+    f"₹{annual_saving:,.0f}"
+)
+
+
+# ============================================================
+# PERSONALIZED ADVICE
+# ============================================================
+
+st.subheader(
+    "🌱 Personalized Energy-Saving Advice"
+)
+
+if len(all_results) > 0:
+
+    highest = all_results.loc[
+        all_results[
+            "Monthly Units (kWh)"
+        ].idxmax()
+    ]
+
+    highest_name = highest[
+        "Appliance"
+    ]
+
+    highest_units = highest[
+        "Monthly Units (kWh)"
+    ]
+
+    if "Air Conditioner" in highest_name:
+
+        st.warning(
+            "❄️ Your AC is your largest estimated consumer. "
+            "Reducing unnecessary operating hours and using "
+            "===============================
 
 def generate_smart_insights(
     appliance_df: pd.DataFrame,
